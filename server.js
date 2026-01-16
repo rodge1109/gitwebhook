@@ -1,4 +1,39 @@
-   // server.js
+
+// =======================
+// HEALTH CHECK (Render)
+// =======================
+app.get('/health', async (req, res) => {
+  if (!sheets) {
+    return res.status(500).json({
+      status: 'ERROR',
+      sheets: false,
+      message: 'Google Sheets not initialized'
+    });
+  }
+
+  try {
+    await sheets.spreadsheets.get({
+      spreadsheetId: process.env.SHEET_ID,
+    });
+
+    res.json({
+      status: 'OK',
+      sheets: true
+    });
+  } catch (err) {
+    res.status(500).json({
+      status: 'ERROR',
+      sheets: false,
+      error: err.message
+    });
+  }
+});
+
+
+
+
+
+// server.js
 require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
