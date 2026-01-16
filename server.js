@@ -15,9 +15,9 @@ app.use(bodyParser.json());
 let sheets;
 
 try {
-  const credentials = process.env.GOOGLE_CREDENTIALS
-    ? JSON.parse(process.env.GOOGLE_CREDENTIALS.replace(/\\n/g, '\n'))
-    : require('./credentials.json'); // local fallback
+  const credentials = process.env.GOOGLE_CREDENTIALS_BASE64
+  ? JSON.parse(Buffer.from(process.env.GOOGLE_CREDENTIALS_BASE64, 'base64').toString())
+  : require('./credentials.json'); // local fallback
 
   const auth = new google.auth.GoogleAuth({
     credentials,
