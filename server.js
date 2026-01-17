@@ -904,10 +904,13 @@ app.post('/webhook', async (req, res) => {
           if (match) {
             const column_c = match[2] ? match[2].trim() : null;
             
+            console.log('Column C value:', column_c);
+            
             // Check if Column C contains image URLs (single or pipe-separated)
             if (column_c && (column_c.startsWith('http://') || column_c.startsWith('https://') || column_c.includes('drive.google.com'))) {
               // Parse pipe-separated URLs
               imageUrls = column_c.split('|').map(url => url.trim()).filter(url => url.length > 0);
+              console.log('Image URLs detected:', imageUrls);
             }
             
             const action = column_c && imageUrls.length === 0 ? column_c.toLowerCase() : null;
