@@ -638,13 +638,24 @@ function sendTyping(senderPsid, pageToken) {
   );
 }
 
-function callSendAPI(senderPsid, response, pageToken, quickReplies = null, template = null) {
+function callSendAPI(senderPsid, response, pageToken, quickReplies = null, template = null, imageUrl = null) {
   let messageData = {
     recipient: { id: senderPsid }
   };
   
   if (template) {
     messageData.message = { attachment: template };
+  } else if (imageUrl) {
+    // Send image attachment
+    messageData.message = {
+      attachment: {
+        type: 'image',
+        payload: {
+          url: imageUrl,
+          is_reusable: true
+        }
+      }
+    };
   } else if (quickReplies) {
     messageData.message = { text: response, quick_replies: quickReplies };
   } else {
@@ -888,11 +899,20 @@ app.post('/webhook', async (req, res) => {
           });
 
           let reply = "Sorry, I didn't understand that. Try another keyword!";
+          let imageUrls = [];
           
           if (match) {
-            const action = match[2] ? match[2].trim().toLowerCase() : null;
+            const column_c = match[2] ? match[2].trim() : null;
             
-            if (action) {
+            // Check if Column C contains image URLs (single or pipe-separated)
+            if (column_c && (column_c.startsWith('http://') || column_c.startsWith('https://') || column_c.includes('drive.google.com'))) {
+              // Parse pipe-separated URLs
+              imageUrls = column_c.split('|').map(url => url.trim()).filter(url => url.length > 0);
+            }
+            
+            const action = column_c && imageUrls.length === 0 ? column_c.toLowerCase() : null;
+            
+            if (action && imageUrls.length === 0) {
               const actionResult = await executeSpecialAction(action);
               reply = actionResult || match[1];
             } else if (match[1]) {
@@ -902,7 +922,20 @@ app.post('/webhook', async (req, res) => {
           }
 
           sendTyping(senderPsid, pageToken);
-          setTimeout(() => callSendAPI(senderPsid, reply, pageToken), 1500);
+          setTimeout(() => {
+            // Send text reply first
+            callSendAPI(senderPsid, reply, pageToken);
+            
+            // Send all images at once simultaneously
+            if (imageUrls.length > 0) {
+              Promise.all(imageUrls.map(url => 
+                new Promise((resolve) => {
+                  callSendAPI(senderPsid, null, pageToken, null, null, url);
+                  resolve();
+                })
+              ));
+            }
+          }, 1500);
         }
       }
     }
