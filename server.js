@@ -931,12 +931,9 @@ app.post('/webhook', async (req, res) => {
             
             // Send all images at once simultaneously
             if (imageUrls.length > 0) {
-              Promise.all(imageUrls.map(url => 
-                new Promise((resolve) => {
-                  callSendAPI(senderPsid, null, pageToken, null, null, url);
-                  resolve();
-                })
-              ));
+              imageUrls.forEach(url => {
+                callSendAPI(senderPsid, null, pageToken, null, null, url);
+              });
             }
           }, 1500);
         }
