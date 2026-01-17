@@ -647,6 +647,7 @@ function callSendAPI(senderPsid, response, pageToken, quickReplies = null, templ
     messageData.message = { attachment: template };
   } else if (imageUrl) {
     // Send image attachment
+    console.log('Sending image:', imageUrl);
     messageData.message = {
       attachment: {
         type: 'image',
@@ -662,6 +663,8 @@ function callSendAPI(senderPsid, response, pageToken, quickReplies = null, templ
     messageData.message = { text: response };
   }
   
+  console.log('API Request Body:', JSON.stringify(messageData, null, 2));
+  
   request(
     {
       uri: `https://graph.facebook.com/${process.env.GRAPH_API_VERSION}/me/messages`,
@@ -670,8 +673,10 @@ function callSendAPI(senderPsid, response, pageToken, quickReplies = null, templ
       json: messageData,
     },
     (err, res, body) => {
-      if (!err) console.log('Message sent!');
-      else console.error('Unable to send message:', err, body);
+      if (!err) {
+        console.log('Message sent! Response:', body);
+      }
+      else console.error('❌ Unable to send message:', err.message, body);
     }
   );
 }
