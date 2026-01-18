@@ -1144,3 +1144,314 @@ app.post('/webhook', async (req, res) => {
 // =======================
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Webhook server running on port ${PORT}`));
+
+// QUICK FIX: Add this to your server.js and visit the endpoint
+
+// =======================
+// SUBSCRIBE TO FEED FIELD
+// =======================
+
+app.get('/subscribe-feed', async (req, res) => {
+  const request = require('request');
+  
+  try {
+    // Get all page configurations
+    const configRes = await sheets.spreadsheets.values.get({
+      spreadsheetId: process.env.SHEET_ID,
+      range: 'WebhookConfig!A:D',
+    });
+
+    const rows = configRes.data.values || [];
+    const results = [];
+
+    for (const row of rows.slice(1)) { // Skip header row
+      if (!row[0] || !row[1]) continue;
+      
+      const pageId = row[0];
+      const pageToken = row[1];
+      
+      console.log(`\n${'='.repeat(80)}`);
+      console.log(`Processing Page ID: ${pageId}`);
+      console.log('='.repeat(80));
+      
+      // Step 1: Check current subscriptions
+      const checkSub = await new Promise((resolve) => {
+        request.get({
+          url: `https://graph.facebook.com/${process.env.GRAPH_API_VERSION || 'v21.0'}/${pageId}/subscribed_apps`,
+          qs: { access_token: pageToken },
+          json: true
+        }, (err, response, body) => {
+          if (err) {
+            console.error('❌ Error checking subscriptions:', err.message);
+            resolve({ error: err.message });
+          } else if (body.error) {
+            console.error('❌ API Error:', body.error);
+            resolve({ error: body.error });
+          } else {
+            console.log('✅ Current subscriptions:', JSON.stringify(body, null, 2));
+            resolve(body);
+          }
+        });
+      });
+      
+      // Step 2: Subscribe to feed field
+      const subscribe = await new Promise((resolve) => {
+        request.post({
+          url: `https://graph.facebook.com/${process.env.GRAPH_API_VERSION || 'v21.0'}/${pageId}/subscribed_apps`,
+          qs: { 
+            access_token: pageToken,
+            subscribed_fields: 'feed,messages,messaging_postbacks,message_reads,message_deliveries'
+          },
+          json: true
+        }, (err, response, body) => {
+          if (err) {
+            console.error('❌ Error subscribing:', err.message);
+            resolve({ error: err.message });
+          } else if (body.error) {
+            console.error('❌ API Error:', body.error);
+            resolve({ error: body.error });
+          } else {
+            console.log('✅ Subscription response:', JSON.stringify(body, null, 2));
+            resolve(body);
+          }
+        });
+      });
+      
+      // Step 3: Verify new subscriptions
+      const verifySub = await new Promise((resolve) => {
+        request.get({
+          url: `https://graph.facebook.com/${process.env.GRAPH_API_VERSION || 'v21.0'}/${pageId}/subscribed_apps`,
+          qs: { access_token: pageToken },
+          json: true
+        }, (err, response, body) => {
+          if (err) {
+            console.error('❌ Error verifying:', err.message);
+            resolve({ error: err.message });
+          } else if (body.error) {
+            console.error('❌ API Error:', body.error);
+            resolve({ error: body.error });
+          } else {
+            console.log('✅ Updated subscriptions:', JSON.stringify(body, null, 2));
+            resolve(body);
+          }
+        });
+      });
+      
+      // Check if feed is now subscribed
+      const feedSubscribed = verifySub.data && 
+                            verifySub.data[0] && 
+                            verifySub.data[0].subscribed_fields && 
+                            verifySub.data[0].subscribed_fields.includes('feed');
+      
+      results.push({
+        pageId,
+        beforeSubscription: checkSub,
+        subscriptionResult: subscribe,
+        afterSubscription: verifySub,
+        feedSubscribed: feedSubscribed,
+        status: feedSubscribed ? '✅ SUCCESS' : '❌ FAILED'
+      });
+      
+      console.log(`\n${feedSubscribed ? '✅ SUCCESS' : '❌ FAILED'}: Feed subscription for page ${pageId}`);
+      console.log('='.repeat(80) + '\n');
+    }
+
+    // Generate HTML response
+    const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Feed Subscription Results</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 1200px;
+      margin: 50px auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    .container {
+      background: white;
+      padding: 30px;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    h1 {
+      color: #1877f2;
+      border-bottom: 3px solid #1877f2;
+      padding-bottom: 10px;
+    }
+    .page-result {
+      background: #f8f9fa;
+      padding: 20px;
+      margin: 20px 0;
+      border-radius: 5px;
+      border-left: 5px solid #1877f2;
+    }
+    .success {
+      border-left-color: #28a745;
+      background: #d4edda;
+    }
+    .failed {
+      border-left-color: #dc3545;
+      background: #f8d7da;
+    }
+    .status {
+      font-size: 24px;
+      font-weight: bold;
+      margin-bottom: 10px;
+    }
+    .subscribed-fields {
+      background: white;
+      padding: 10px;
+      border-radius: 3px;
+      margin: 10px 0;
+      font-family: monospace;
+    }
+    .instructions {
+      background: #fff3cd;
+      border: 1px solid #ffc107;
+      padding: 20px;
+      border-radius: 5px;
+      margin-top: 30px;
+    }
+    code {
+      background: #e9ecef;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-family: monospace;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>📡 Feed Subscription Results</h1>
+    
+    ${results.map(result => `
+      <div class="page-result ${result.feedSubscribed ? 'success' : 'failed'}">
+        <div class="status">${result.status}</div>
+        <p><strong>Page ID:</strong> ${result.pageId}</p>
+        
+        ${result.afterSubscription.data && result.afterSubscription.data[0] ? `
+          <div class="subscribed-fields">
+            <strong>Subscribed Fields:</strong><br>
+            ${result.afterSubscription.data[0].subscribed_fields.join(', ')}
+          </div>
+        ` : ''}
+        
+        ${result.feedSubscribed ? `
+          <p style="color: #28a745;">✅ The <strong>feed</strong> field is now subscribed!</p>
+          <p>You should now receive webhooks when users comment on your posts.</p>
+        ` : `
+          <p style="color: #dc3545;">❌ Failed to subscribe to feed field.</p>
+          ${result.subscriptionResult.error ? `
+            <p><strong>Error:</strong> ${JSON.stringify(result.subscriptionResult.error)}</p>
+          ` : ''}
+        `}
+      </div>
+    `).join('')}
+    
+    <div class="instructions">
+      <h2>🧪 Test It Now</h2>
+      <ol>
+        <li>Go to your Facebook Page</li>
+        <li>Make a new post</li>
+        <li>Comment on that post</li>
+        <li>Check your server logs for: <code>📝 COMMENT EVENT DETECTED</code></li>
+        <li>You should receive a DM from your page</li>
+      </ol>
+      
+      <h3>Expected Webhook Structure:</h3>
+      <pre style="background: #f8f9fa; padding: 15px; border-radius: 5px; overflow-x: auto;">
+{
+  "object": "page",
+  "entry": [{
+    "id": "PAGE_ID",
+    "changes": [{
+      "field": "feed",
+      "value": {
+        "item": "comment",
+        "comment_id": "...",
+        "from": { "id": "...", "name": "..." },
+        "message": "test comment",
+        "post_id": "..."
+      }
+    }]
+  }]
+}
+      </pre>
+    </div>
+  </div>
+</body>
+</html>
+    `;
+
+    res.send(html);
+    
+  } catch (err) {
+    console.error('Fatal error:', err);
+    res.status(500).json({ 
+      success: false, 
+      error: err.message,
+      stack: err.stack 
+    });
+  }
+});
+
+
+// =======================
+// DIAGNOSTIC ENDPOINT
+// =======================
+
+app.get('/check-subscriptions', async (req, res) => {
+  const request = require('request');
+  
+  try {
+    const configRes = await sheets.spreadsheets.values.get({
+      spreadsheetId: process.env.SHEET_ID,
+      range: 'WebhookConfig!A:D',
+    });
+
+    const rows = configRes.data.values || [];
+    const results = [];
+
+    for (const row of rows.slice(1)) {
+      if (!row[0] || !row[1]) continue;
+      
+      const pageId = row[0];
+      const pageToken = row[1];
+      
+      const subscriptions = await new Promise((resolve) => {
+        request.get({
+          url: `https://graph.facebook.com/${process.env.GRAPH_API_VERSION || 'v21.0'}/${pageId}/subscribed_apps`,
+          qs: { access_token: pageToken },
+          json: true
+        }, (err, response, body) => {
+          resolve(body);
+        });
+      });
+      
+      results.push({
+        pageId,
+        subscriptions: subscriptions.data || [],
+        hasFeed: subscriptions.data && 
+                 subscriptions.data[0] && 
+                 subscriptions.data[0].subscribed_fields && 
+                 subscriptions.data[0].subscribed_fields.includes('feed')
+      });
+    }
+
+    res.json({
+      timestamp: new Date().toISOString(),
+      results: results,
+      summary: {
+        totalPages: results.length,
+        pagesWithFeed: results.filter(r => r.hasFeed).length,
+        pagesWithoutFeed: results.filter(r => !r.hasFeed).length
+      }
+    });
+    
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
