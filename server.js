@@ -1141,10 +1141,23 @@ if (entry.changes) {
   res.sendStatus(404);
 }
 
+});
 
-// =======================
-// SERVER
-// =======================
+/* =======================
+   SERVER START
+======================= */
+
 const PORT = process.env.PORT || 3000;
-
-app.listen(PORT, () => console.log(`Webhook server running on port ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`\n${'='.repeat(80)}`);
+  console.log(`✅ Server running on port ${PORT}`);
+  console.log(`✅ Graph API: ${process.env.GRAPH_API_VERSION || 'v21.0'}`);
+  console.log(`${'='.repeat(80)}\n`);
+  console.log(`📋 Available endpoints:`);
+  console.log(`   GET  /webhook              - Webhook verification`);
+  console.log(`   POST /webhook              - Receive events`);
+  console.log(`   GET  /health               - Health check`);
+  console.log(`   GET  /subscribe-feed       - Subscribe pages to feed`);
+  console.log(`   GET  /check-subscriptions  - Check subscription status`);
+  console.log(`${'='.repeat(80)}\n`);
+});
