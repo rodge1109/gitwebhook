@@ -1141,7 +1141,7 @@ if (entry.changes) {
   res.sendStatus(404);
 }
 
-});
+};
 
 /* =======================
    SERVER START
@@ -1161,3 +1161,4 @@ app.listen(PORT, () => {
   console.log(`   GET  /check-subscriptions  - Check subscription status`);
   console.log(`${'='.repeat(80)}\n`);
 });
+
