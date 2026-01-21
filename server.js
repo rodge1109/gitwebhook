@@ -1009,144 +1009,142 @@ app.post('/webhook', async (req, res) => {
         }
       } // End of entry.messaging loop
 
-      // =======================
-      // ✅ ENHANCED FACEBOOK COMMENTS HANDLER
-      // =======================
-      if (entry.changes) {
-        console.log('📋 Changes detected:', JSON.stringify(entry.changes, null, 2));
+     // =======================
+// ✅ ENHANCED FACEBOOK COMMENTS HANDLER
+// =======================
+if (entry.changes) {
+  console.log('📋 Changes detected:', JSON.stringify(entry.changes, null, 2));
+  
+  for (const change of entry.changes) {
+    console.log('🔍 Processing change:', change.field, change.value?.item);
+    
+    if (change.field === 'feed' && change.value && change.value.item === 'comment') {
+      const commentId = change.value.comment_id;
+      const postId = change.value.post_id;
+      const commentMessage = change.value.message;
+      const commenterData = change.value.from;
+      const commenterId = commenterData?.id;
+      
+      // ✅ DUPLICATE CHECK
+      if (processedComments.has(commentId)) {
+        console.log(`⚠️ Skipping duplicate comment: ${commentId}`);
+        continue;
+      }
+      
+      // Mark as processed immediately
+      processedComments.add(commentId);
+      
+      console.log(`\n📝 New comment on post ${postId}:`);
+      console.log(`Comment ID: ${commentId}`);
+      console.log(`Commenter ID: ${commenterId}`);
+      console.log(`Commenter Name: ${commenterData?.name || 'Unknown'}`);
+      console.log(`Comment text: ${commentMessage}\n`);
+      
+      // If we don't have commenter ID, we can't send DM
+      if (!commenterId) {
+        console.error('❌ No commenter ID available, cannot send DM');
+        continue;
+      }
+      
+      // ✅ KEYWORD MATCHING (like regular DM system)
+      const keywords = await getKeywords(keywordsSheetId);
+      const commentLower = commentMessage.toLowerCase().trim();
+      
+      const match = keywords.find(row => {
+        if (!row[0]) return false;
+        const keywordList = row[0].toLowerCase().split(',').map(k => k.trim());
+        return keywordList.some(keyword => commentLower.includes(keyword));
+      });
+      
+      // Prepare messages
+      let publicReply = "Thanks for commenting! 💬 Check your messages for more info.";
+      let dmMessage = "Hi! Thanks for your comment on our post. How can I help you?";
+      let imageUrls = [];
+      
+      if (match) {
+        // Check for images in Column C
+        const column_c = match[2] ? match[2].trim() : null;
         
-        for (const change of entry.changes) {
-          console.log('🔍 Processing change:', change.field, change.value?.item);
-          
-          if (change.field === 'feed' && change.value && change.value.item === 'comment') {
-            const commentId = change.value.comment_id;
-            const postId = change.value.post_id;
-            const commentMessage = change.value.message;
-            const commenterData = change.value.from;
-            const commenterId = commenterData?.id;
-            
-            // ✅ DUPLICATE CHECK
-            if (processedComments.has(commentId)) {
-              console.log(`⚠️ Skipping duplicate comment: ${commentId}`);
-              continue;
-            }
-            
-            // Mark as processed immediately
-            processedComments.add(commentId);
-            
-            console.log(`\n📝 New comment on post ${postId}:`);
-            console.log(`Comment ID: ${commentId}`);
-            console.log(`Commenter ID: ${commenterId}`);
-            console.log(`Commenter Name: ${commenterData?.name || 'Unknown'}`);
-            console.log(`Comment text: ${commentMessage}\n`);
-            
-            // If we don't have commenter ID, we can't send DM
-            if (!commenterId) {
-              console.error('❌ No commenter ID available, cannot send DM');
-              continue;
-            }
-            
-            // ✅ KEYWORD MATCHING (like regular DM system)
-            const keywords = await getKeywords(keywordsSheetId);
-            const commentLower = commentMessage.toLowerCase().trim();
-            
-            const match = keywords.find(row => {
-              if (!row[0]) return false;
-              const keywordList = row[0].toLowerCase().split(',').map(k => k.trim());
-              return keywordList.some(keyword => commentLower.includes(keyword));
-            });
-            
-            // Prepare messages
-            let publicReply = "Thanks for commenting! 💬 Check your messages for more info.";
-            let dmMessage = "Hi! Thanks for your comment on our post. How can I help you?";
-            let imageUrls = [];
-            
-            if (match) {
-              // Check for images in Column C
-              const column_c = match[2] ? match[2].trim() : null;
-              
-              if (column_c && (column_c.startsWith('http://') || column_c.startsWith('https://') || column_c.includes('drive.google.com'))) {
-                imageUrls = column_c.split('|').map(url => url.trim()).filter(url => url.length > 0);
-              }
-              
-              // Get custom reply from Column B
-              if (match[1]) {
-                const responses = match[1].split('|').map(r => r.trim());
-                dmMessage = responses[Math.floor(Math.random() * responses.length)];
-                publicReply = "Thanks for your comment! 📩 I've sent you a message with details.";
-              }
-            }
-            
-            // ✅ SEND PUBLIC REPLY TO COMMENT
-            try {
-              await replyToComment(commentId, publicReply, pageToken);
-              console.log(`✅ Public reply sent to comment ${commentId}`);
-            } catch (error) {
-              console.error(`❌ Failed to send public reply to comment ${commentId}:`, error);
-              // Continue anyway to try sending DM
-            }
-            
-            // ✅ ACTUALLY SEND DM TO COMMENTER
-            setTimeout(async () => {
-              try {
-                // Send text message
-                sendTyping(commenterId, pageToken);
-                
-                setTimeout(() => {
-                  callSendAPI(commenterId, dmMessage, pageToken);
-                  console.log(`✅ DM sent to commenter ${commenterId}`);
-                  
-                  // Send images if any
-                  if (imageUrls.length > 0) {
-                    setTimeout(() => {
-                      imageUrls.forEach(url => {
-                        callSendAPI(commenterId, null, pageToken, null, null, url);
-                      });
-                      console.log(`✅ Sent ${imageUrls.length} image(s) to commenter ${commenterId}`);
-                    }, 1000);
-                  }
-                }, 1500);
-                
-                // Log the commenter PSID
-                await logPSID(commenterId);
-                
-              } catch (error) {
-                console.error(`❌ Failed to send DM to commenter ${commenterId}:`, error);
-              }
-            }, 2000); // Wait 2 seconds before sending DM
-            
-            // ✅ SPECIAL: Check if comment is about booking
-            if (commentLower.includes('book') || commentLower.includes('order') || 
-                commentLower.includes('reserve') || commentLower.includes('appointment')) {
-              
-              setTimeout(async () => {
-                const bookingConfig = await getBookingConfig(bookingSheetId);
-                
-                if (bookingConfig && bookingConfig.length > 0) {
-                  const bookingReply = await startBooking(commenterId, bookingConfig);
-                  
-                  setTimeout(() => {
-                    if (bookingReply.template) {
-                      callSendAPI(commenterId, null, pageToken, null, bookingReply.template);
-                      console.log(`✅ Booking flow started for commenter ${commenterId}`);
-                    }
-                  }, 3000);
-                }
-              }, 4000); // Wait 4 seconds, after initial DM
-            }
-          }
+        if (column_c && (column_c.startsWith('http://') || column_c.startsWith('https://') || column_c.includes('drive.google.com'))) {
+          imageUrls = column_c.split('|').map(url => url.trim()).filter(url => url.length > 0);
+        }
+        
+        // Get custom reply from Column B
+        if (match[1]) {
+          const responses = match[1].split('|').map(r => r.trim());
+          dmMessage = responses[Math.floor(Math.random() * responses.length)];
+          publicReply = "Thanks for your comment! 📩 I've sent you a message with details.";
         }
       }
+      
+      // ✅ SEND PUBLIC REPLY TO COMMENT
+      try {
+        await replyToComment(commentId, publicReply, pageToken);
+        console.log(`✅ Public reply sent to comment ${commentId}`);
+      } catch (error) {
+        console.error(`❌ Failed to send public reply to comment ${commentId}:`, error);
+        // Continue anyway to try sending DM
+      }
+      
+      // ✅ ACTUALLY SEND DM TO COMMENTER
+      setTimeout(async () => {
+        try {
+          // Send text message
+          sendTyping(commenterId, pageToken);
+          
+          setTimeout(() => {
+            callSendAPI(commenterId, dmMessage, pageToken);
+            console.log(`✅ DM sent to commenter ${commenterId}`);
+            
+            // Send images if any
+            if (imageUrls.length > 0) {
+              setTimeout(() => {
+                imageUrls.forEach(url => {
+                  callSendAPI(commenterId, null, pageToken, null, null, url);
+                });
+                console.log(`✅ Sent ${imageUrls.length} image(s) to commenter ${commenterId}`);
+              }, 1000);
+            }
+          }, 1500);
+          
+          // Log the commenter PSID
+          await logPSID(commenterId);
+          
+        } catch (error) {
+          console.error(`❌ Failed to send DM to commenter ${commenterId}:`, error);
+        }
+      }, 2000); // Wait 2 seconds before sending DM
+      
+      // ✅ SPECIAL: Check if comment is about booking
+      if (commentLower.includes('book') || commentLower.includes('order') || 
+          commentLower.includes('reserve') || commentLower.includes('appointment')) {
+        
+        setTimeout(async () => {
+          const bookingConfig = await getBookingConfig(bookingSheetId);
+          
+          if (bookingConfig && bookingConfig.length > 0) {
+            const bookingReply = await startBooking(commenterId, bookingConfig);
+            
+            setTimeout(() => {
+              if (bookingReply.template) {
+                callSendAPI(commenterId, null, pageToken, null, bookingReply.template);
+                console.log(`✅ Booking flow started for commenter ${commenterId}`);
+              }
+            }, 3000);
+          }
+        }, 4000); // Wait 4 seconds, after initial DM
+      }
     }
-
-    res.sendStatus(200);
-  } else {
-    res.sendStatus(404);
   }
-});
+  res.sendStatus(200);
+} else {
+  res.sendStatus(404);
+}
+
 
 // =======================
 // SERVER
 // =======================
 const PORT = process.env.PORT || 3000;
+
 app.listen(PORT, () => console.log(`Webhook server running on port ${PORT}`));
