@@ -1085,8 +1085,7 @@ if (entry.changes) {
         console.error(`❌ Failed to send public reply to comment ${commentId}:`, error);
         // Continue anyway to try sending DM
       }
-      
-      // ✅ ACTUALLY SEND DM TO COMMENTER
+     // ✅ ACTUALLY SEND DM TO COMMENTER
 setTimeout(async () => {
   try {
     // Send text message
@@ -1133,16 +1132,17 @@ if (commentLower.includes('book') || commentLower.includes('order') ||
       }, 3000);
     }
   }, 4000); // Wait 4 seconds, after initial DM
-} // Close the "if" block for booking
+} // End of the "if" block for booking
 
-// Close the final webhook logic block
-res.sendStatus(200);
+// This part closes your main handler function or route.
+res.sendStatus(200); // Send a successful response
 
-} else {
-  res.sendStatus(404);
-} // Close the "else" block for the webhook condition
+} else { 
+  res.sendStatus(404); // Send 404 if no changes
+} // Close the "else" for the condition checking "entry.changes"
 
-};  // This closing brace is for the outer function (perhaps the webhook handler)
+// Closing the outer function
+};  // This closing brace is important to close the outer function, like the webhook handler or route handler.
 
 // =======================
 // SERVER START
