@@ -1087,66 +1087,66 @@ if (entry.changes) {
       }
       
       // ✅ ACTUALLY SEND DM TO COMMENTER
-      setTimeout(async () => {
-        try {
-          // Send text message
-          sendTyping(commenterId, pageToken);
-          
-          setTimeout(() => {
-            callSendAPI(commenterId, dmMessage, pageToken);
-            console.log(`✅ DM sent to commenter ${commenterId}`);
-            
-            // Send images if any
-            if (imageUrls.length > 0) {
-              setTimeout(() => {
-                imageUrls.forEach(url => {
-                  callSendAPI(commenterId, null, pageToken, null, null, url);
-                });
-                console.log(`✅ Sent ${imageUrls.length} image(s) to commenter ${commenterId}`);
-              }, 1000);
-            }
-          }, 1500);
-          
-          // Log the commenter PSID
-          await logPSID(commenterId);
-          
-        } catch (error) {
-          console.error(`❌ Failed to send DM to commenter ${commenterId}:`, error);
-        }
-      }, 2000); // Wait 2 seconds before sending DM
+setTimeout(async () => {
+  try {
+    // Send text message
+    sendTyping(commenterId, pageToken);
+    
+    setTimeout(() => {
+      callSendAPI(commenterId, dmMessage, pageToken);
+      console.log(`✅ DM sent to commenter ${commenterId}`);
       
-      // ✅ SPECIAL: Check if comment is about booking
-      if (commentLower.includes('book') || commentLower.includes('order') || 
-          commentLower.includes('reserve') || commentLower.includes('appointment')) {
-        
-        setTimeout(async () => {
-          const bookingConfig = await getBookingConfig(bookingSheetId);
-          
-          if (bookingConfig && bookingConfig.length > 0) {
-            const bookingReply = await startBooking(commenterId, bookingConfig);
-            
-            setTimeout(() => {
-              if (bookingReply.template) {
-                callSendAPI(commenterId, null, pageToken, null, bookingReply.template);
-                console.log(`✅ Booking flow started for commenter ${commenterId}`);
-              }
-            }, 3000);
-          }
-        }, 4000); // Wait 4 seconds, after initial DM
+      // Send images if any
+      if (imageUrls.length > 0) {
+        setTimeout(() => {
+          imageUrls.forEach(url => {
+            callSendAPI(commenterId, null, pageToken, null, null, url);
+          });
+          console.log(`✅ Sent ${imageUrls.length} image(s) to commenter ${commenterId}`);
+        }, 1000);
       }
-    }
+    }, 1500);
+    
+    // Log the commenter PSID
+    await logPSID(commenterId);
+    
+  } catch (error) {
+    console.error(`❌ Failed to send DM to commenter ${commenterId}:`, error);
   }
-  res.sendStatus(200);
+}, 2000); // Wait 2 seconds before sending DM
+
+// ✅ SPECIAL: Check if comment is about booking
+if (commentLower.includes('book') || commentLower.includes('order') || 
+    commentLower.includes('reserve') || commentLower.includes('appointment')) {
+
+  setTimeout(async () => {
+    const bookingConfig = await getBookingConfig(bookingSheetId);
+    
+    if (bookingConfig && bookingConfig.length > 0) {
+      const bookingReply = await startBooking(commenterId, bookingConfig);
+      
+      setTimeout(() => {
+        if (bookingReply.template) {
+          callSendAPI(commenterId, null, pageToken, null, bookingReply.template);
+          console.log(`✅ Booking flow started for commenter ${commenterId}`);
+        }
+      }, 3000);
+    }
+  }, 4000); // Wait 4 seconds, after initial DM
+} // Close the "if" block for booking
+
+// Close the final webhook logic block
+res.sendStatus(200);
+
 } else {
   res.sendStatus(404);
-}
+} // Close the "else" block for the webhook condition
 
-};
+};  // This closing brace is for the outer function (perhaps the webhook handler)
 
-/* =======================
-   SERVER START
-======================= */
-
+// =======================
+// SERVER START
+// =======================
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`\n${'='.repeat(80)}`);
@@ -1161,4 +1161,3 @@ app.listen(PORT, () => {
   console.log(`   GET  /check-subscriptions  - Check subscription status`);
   console.log(`${'='.repeat(80)}\n`);
 });
-
