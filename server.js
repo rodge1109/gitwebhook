@@ -740,6 +740,53 @@ setInterval(() => {
 }, 60 * 60 * 1000);
 
  
+
+// =======================
+// Get Page Token
+// =======================
+async function getPageToken(pageId) {
+  try {
+    const config = await getPageConfig(pageId);
+    
+    if (config && config.pageToken) {
+      console.log(`✅ Token retrieved for page ${pageId}`);
+      return config.pageToken;
+    }
+    
+    console.warn(`⚠️ No token in sheet for page ${pageId}, using env fallback`);
+    return process.env.PAGE_ACCESS_TOKEN;
+    
+  } catch (error) {
+    console.error('❌ Error getting page token:', error.message);
+    return process.env.PAGE_ACCESS_TOKEN;
+  }
+}
+
+
+// =======================
+// WEBHOOK VERIFICATION (GET)
+// =======================
+app.get('/webhook', (req, res) => {
+  const VERIFY_TOKEN = process.env.VERIFY_TOKEN || 'your_verify_token_here';
+  
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+  
+  if (mode && token) {
+    if (mode === 'subscribe' && token === VERIFY_TOKEN) {
+      console.log('✅ WEBHOOK_VERIFIED');
+      res.status(200).send(challenge);
+    } else {
+      console.log('❌ WEBHOOK_VERIFICATION_FAILED');
+      res.sendStatus(403);
+    }
+  } else {
+    res.sendStatus(400);
+  }
+});
+
+
 // =======================
 // Webhook handler
 // =======================
@@ -825,175 +872,190 @@ app.post('/webhook', async (req, res) => {
             continue;
           }
 
-          // Handle text messages
-          if (messaging.message && messaging.message.text) {
-            const receivedText = messaging.message.text.toLowerCase().trim();
+// Handle text messages
+if (messaging.message && messaging.message.text) {
+  const receivedText = messaging.message.text.toLowerCase().trim();
+  
+  // Get page config first
+  const pageConfig = await getPageConfig(pageId);
+  const keywordsSheetId = pageConfig?.keywordsSheetId;
+  const bookingSheetId = pageConfig?.bookingSheetId;
 
-            // Refresh keywords on 'refresh data' command
-            if (receivedText === 'refresh data') {
-              await getKeywords(keywordsSheetId, true);
-              sendTyping(senderPsid, pageToken);
-              setTimeout(() => callSendAPI(senderPsid, 'Keywords refreshed!', pageToken), 1500);
-              console.log('Keywords refreshed');
-              continue;
-            }
+  // Add safety check
+  if (!keywordsSheetId || !bookingSheetId) {
+    console.error(`❌ Missing config for page ${pageId}`);
+    sendTyping(senderPsid, pageToken);
+    setTimeout(() => {
+      callSendAPI(senderPsid, "Sorry, configuration error. Please contact support.", pageToken);
+    }, 1000);
+    continue;
+  }
 
-            // Handle booking session
-            if (bookingSessions[senderPsid]) {
-              console.log(`Processing booking step: ${bookingSessions[senderPsid].step}`);
+  // Refresh keywords on 'refresh data' command
+  if (receivedText === 'refresh data') {
+    await getKeywords(keywordsSheetId, true);
+    sendTyping(senderPsid, pageToken);
+    setTimeout(() => callSendAPI(senderPsid, 'Keywords refreshed!', pageToken), 1500);
+    console.log('Keywords refreshed');
+    continue;
+  }
 
-              // Check if waiting for a custom date
-              if (bookingSessions[senderPsid].waitingForCustomDate) {
-                const customDate = messaging.message.text;
+  // Handle booking session
+  if (bookingSessions[senderPsid]) {
+    console.log(`Processing booking step: ${bookingSessions[senderPsid].step}`);
 
-                // Validate the custom date
-                const validation = validateDateFormat(customDate);
-                if (!validation.valid) {
-                  sendTyping(senderPsid, pageToken);
-                  setTimeout(() => {
-                    callSendAPI(senderPsid,
-                      "Invalid date format!\n\nPlease enter the date using a standard format like **MM/DD/YYYY** or **Month DD, YYYY**.\nExample: 12/25/2025 or December 25, 2025",
-                      pageToken);
-                  }, 1000);
-                  continue;
-                }
+    // Check if waiting for a custom date
+    if (bookingSessions[senderPsid].waitingForCustomDate) {
+      const customDate = messaging.message.text;
 
-                // Save valid date and move to next step
-                const currentStep = bookingSessions[senderPsid].step;
-                const stepConfig = bookingSessions[senderPsid].config[currentStep - 1];
+      // Validate the custom date
+      const validation = validateDateFormat(customDate);
+      if (!validation.valid) {
+        sendTyping(senderPsid, pageToken);
+        setTimeout(() => {
+          callSendAPI(senderPsid,
+            "Invalid date format!\n\nPlease enter the date using a standard format like **MM/DD/YYYY** or **Month DD, YYYY**.\nExample: 12/25/2025 or December 25, 2025",
+            pageToken);
+        }, 1000);
+        continue;
+      }
 
-                if (stepConfig) {
-                  bookingSessions[senderPsid].data[stepConfig[0]] = validation.formatted;
-                }
+      // Save valid date and move to next step
+      const currentStep = bookingSessions[senderPsid].step;
+      const stepConfig = bookingSessions[senderPsid].config[currentStep - 1];
 
-                delete bookingSessions[senderPsid].waitingForCustomDate;
+      if (stepConfig) {
+        bookingSessions[senderPsid].data[stepConfig[0]] = validation.formatted;
+      }
 
-                bookingSessions[senderPsid].step++;
-                const nextQuestion = askQuestion(senderPsid, bookingSessions[senderPsid].step);
+      delete bookingSessions[senderPsid].waitingForCustomDate;
 
-                sendTyping(senderPsid, pageToken);
-                setTimeout(() => {
-                  if (nextQuestion.template) {
-                    callSendAPI(senderPsid, null, pageToken, null, nextQuestion.template);
-                  } else if (nextQuestion.quickReplies) {
-                    callSendAPI(senderPsid, nextQuestion.text, pageToken, nextQuestion.quickReplies);
-                  } else {
-                    callSendAPI(senderPsid, nextQuestion.text, pageToken);
-                  }
-                }, 1500);
-                continue;
-              }
+      bookingSessions[senderPsid].step++;
+      const nextQuestion = askQuestion(senderPsid, bookingSessions[senderPsid].step);
 
-              // Proceed with booking if not waiting for a custom date
-              const bookingReply = processBooking(senderPsid, messaging.message.text);
+      sendTyping(senderPsid, pageToken);
+      setTimeout(() => {
+        if (nextQuestion.template) {
+          callSendAPI(senderPsid, null, pageToken, null, nextQuestion.template);
+        } else if (nextQuestion.quickReplies) {
+          callSendAPI(senderPsid, nextQuestion.text, pageToken, nextQuestion.quickReplies);
+        } else {
+          callSendAPI(senderPsid, nextQuestion.text, pageToken);
+        }
+      }, 1500);
+      continue;
+    }
 
-              if (bookingSessions[senderPsid] && bookingSessions[senderPsid].completed) {
-                const session = bookingSessions[senderPsid];
-                console.log('Booking completed! Saving...');
+    // Proceed with booking if not waiting for a custom date
+    const bookingReply = processBooking(senderPsid, messaging.message.text);
 
-                const saveResult = await saveOrder(senderPsid, session.data, bookingSheetId);
+    if (bookingSessions[senderPsid] && bookingSessions[senderPsid].completed) {
+      const session = bookingSessions[senderPsid];
+      console.log('Booking completed! Saving...');
 
-                if (saveResult) {
-                  console.log('Saved to Google Sheets!');
-                } else {
-                  console.error('FAILED to save!');
-                }
+      const saveResult = await saveOrder(senderPsid, session.data, bookingSheetId);
 
-                if (session.mobileNumber && process.env.SEMAPHORE_API_KEY) {
-                  const smsMessage = formatBookingSMS(session.data, session.config);
-                  const smsResult = await sendSMS(session.mobileNumber, smsMessage);
+      if (saveResult) {
+        console.log('Saved to Google Sheets!');
+      } else {
+        console.error('FAILED to save!');
+      }
 
-                  if (smsResult.success) {
-                    console.log(`SMS sent to ${session.mobileNumber}`);
-                  }
-                }
+      if (session.mobileNumber && process.env.SEMAPHORE_API_KEY) {
+        const smsMessage = formatBookingSMS(session.data, session.config);
+        const smsResult = await sendSMS(session.mobileNumber, smsMessage);
 
-                delete bookingSessions[senderPsid];
-              }
+        if (smsResult.success) {
+          console.log(`SMS sent to ${session.mobileNumber}`);
+        }
+      }
 
-              sendTyping(senderPsid, pageToken);
-              setTimeout(() => {
-                if (bookingReply.template) {
-                  callSendAPI(senderPsid, null, pageToken, null, bookingReply.template);
-                } else if (bookingReply.quickReplies) {
-                  callSendAPI(senderPsid, bookingReply.text, pageToken, bookingReply.quickReplies);
-                } else {
-                  callSendAPI(senderPsid, bookingReply.text, pageToken);
-                }
-              }, 1500);
-              continue;
-            }
+      delete bookingSessions[senderPsid];
+    }
 
-            console.log('New message from:', senderPsid);
-            await logPSID(senderPsid);
+    sendTyping(senderPsid, pageToken);
+    setTimeout(() => {
+      if (bookingReply.template) {
+        callSendAPI(senderPsid, null, pageToken, null, bookingReply.template);
+      } else if (bookingReply.quickReplies) {
+        callSendAPI(senderPsid, bookingReply.text, pageToken, bookingReply.quickReplies);
+      } else {
+        callSendAPI(senderPsid, bookingReply.text, pageToken);
+      }
+    }, 1500);
+    continue;
+  }
 
-            const keywords = await getKeywords(keywordsSheetId);
+  console.log('New message from:', senderPsid);
+  await logPSID(senderPsid);
 
-            // Check for order or booking commands
-            if (receivedText.includes('order') || receivedText.includes('book')) {
-              const bookingConfig = await getBookingConfig(bookingSheetId);
+  const keywords = await getKeywords(keywordsSheetId);
 
-              if (bookingConfig && bookingConfig.length > 0) {
-                const bookingReply = await startBooking(senderPsid, bookingConfig);
-                sendTyping(senderPsid, pageToken);
-                setTimeout(() => {
-                  if (bookingReply.template) {
-                    callSendAPI(senderPsid, null, pageToken, null, bookingReply.template);
-                  } else {
-                    callSendAPI(senderPsid, bookingReply.text, pageToken);
-                  }
-                }, 1500);
-              } else {
-                sendTyping(senderPsid, pageToken);
-                setTimeout(() => {
-                  callSendAPI(senderPsid, "Sorry, booking is not available at the moment.", pageToken);
-                }, 1500);
-              }
-              continue;
-            }
+  // Check for order or booking commands
+  if (receivedText.includes('order') || receivedText.includes('book')) {
+    const bookingConfig = await getBookingConfig(bookingSheetId);
 
-            // Keyword matching logic
-            const match = keywords.find(row => {
-              if (!row[0]) return false;
-              const keywordList = row[0].toLowerCase().split(',').map(k => k.trim());
-              return keywordList.some(keyword => receivedText.includes(keyword));
-            });
+    if (bookingConfig && bookingConfig.length > 0) {
+      const bookingReply = await startBooking(senderPsid, bookingConfig);
+      sendTyping(senderPsid, pageToken);
+      setTimeout(() => {
+        if (bookingReply.template) {
+          callSendAPI(senderPsid, null, pageToken, null, bookingReply.template);
+        } else {
+          callSendAPI(senderPsid, bookingReply.text, pageToken);
+        }
+      }, 1500);
+    } else {
+      sendTyping(senderPsid, pageToken);
+      setTimeout(() => {
+        callSendAPI(senderPsid, "Sorry, booking is not available at the moment.", pageToken);
+      }, 1500);
+    }
+    continue;
+  }
 
-            let reply = "Sorry, I didn't understand that. Can you please rephrase?";
-            let imageUrls = [];
+  // Keyword matching logic
+  const match = keywords.find(row => {
+    if (!row[0]) return false;
+    const keywordList = row[0].toLowerCase().split(',').map(k => k.trim());
+    return keywordList.some(keyword => receivedText.includes(keyword));
+  });
 
-            if (match) {
-              const column_c = match[2] ? match[2].trim() : null;
+  let reply = "Sorry, I didn't understand that. Can you please rephrase?";
+  let imageUrls = [];
 
-              console.log('Column C value:', column_c);
+  if (match) {
+    const column_c = match[2] ? match[2].trim() : null;
 
-              if (column_c && (column_c.startsWith('http://') || column_c.startsWith('https://') || column_c.includes('drive.google.com'))) {
-                imageUrls = column_c.split('|').map(url => url.trim()).filter(url => url.length > 0);
-                console.log('Image URLs detected:', imageUrls);
-              }
+    console.log('Column C value:', column_c);
 
-              const action = column_c && imageUrls.length === 0 ? column_c.toLowerCase() : null;
+    if (column_c && (column_c.startsWith('http://') || column_c.startsWith('https://') || column_c.includes('drive.google.com'))) {
+      imageUrls = column_c.split('|').map(url => url.trim()).filter(url => url.length > 0);
+      console.log('Image URLs detected:', imageUrls);
+    }
 
-              if (action && imageUrls.length === 0) {
-                const actionResult = await executeSpecialAction(action);
-                reply = actionResult || match[1];
-              } else if (match[1]) {
-                const responses = match[1].split('|').map(r => r.trim());
-                reply = responses[Math.floor(Math.random() * responses.length)];
-              }
-            }
+    const action = column_c && imageUrls.length === 0 ? column_c.toLowerCase() : null;
 
-            sendTyping(senderPsid, pageToken);
-            setTimeout(() => {
-              callSendAPI(senderPsid, reply, pageToken);
+    if (action && imageUrls.length === 0) {
+      const actionResult = await executeSpecialAction(action);
+      reply = actionResult || match[1];
+    } else if (match[1]) {
+      const responses = match[1].split('|').map(r => r.trim());
+      reply = responses[Math.floor(Math.random() * responses.length)];
+    }
+  }
 
-              if (imageUrls.length > 0) {
-                imageUrls.forEach(url => {
-                  callSendAPI(senderPsid, null, pageToken, null, null, url);
-                });
-              }
-            }, 1500);
-          }
+  sendTyping(senderPsid, pageToken);
+  setTimeout(() => {
+    callSendAPI(senderPsid, reply, pageToken);
+
+    if (imageUrls.length > 0) {
+      imageUrls.forEach(url => {
+        callSendAPI(senderPsid, null, pageToken, null, null, url);
+      });
+    }
+  }, 1500);
+}
         }
       }
     }
@@ -1001,6 +1063,101 @@ app.post('/webhook', async (req, res) => {
   res.sendStatus(200);
 });
  
+// =======================
+// SUBSCRIBE PAGES TO FEED
+// =======================
+app.get('/subscribe-feed', async (req, res) => {
+  try {
+    const pageConfig = await getPageConfig(process.env.PAGE_ID || req.query.pageId);
+    
+    if (!pageConfig) {
+      return res.status(404).json({ 
+        error: 'Page configuration not found',
+        message: 'Please add page config to WebhookConfig sheet'
+      });
+    }
+
+    const subscribeUrl = `https://graph.facebook.com/${process.env.GRAPH_API_VERSION}/${pageConfig.pageId}/subscribed_apps`;
+    
+    request.post(
+      {
+        uri: subscribeUrl,
+        qs: { 
+          access_token: pageConfig.pageToken,
+          subscribed_fields: 'messages,messaging_postbacks,feed,messaging_handovers'
+        }
+      },
+      (err, response, body) => {
+        if (!err && response.statusCode === 200) {
+          console.log('✅ Page subscribed to webhook');
+          res.json({ 
+            success: true, 
+            message: 'Page subscribed successfully',
+            response: JSON.parse(body)
+          });
+        } else {
+          console.error('❌ Failed to subscribe page:', err || body);
+          res.status(500).json({ 
+            success: false, 
+            error: err || body 
+          });
+        }
+      }
+    );
+  } catch (error) {
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
+// =======================
+// CHECK SUBSCRIPTION STATUS
+// =======================
+app.get('/check-subscriptions', async (req, res) => {
+  try {
+    const pageConfig = await getPageConfig(process.env.PAGE_ID || req.query.pageId);
+    
+    if (!pageConfig) {
+      return res.status(404).json({ 
+        error: 'Page configuration not found' 
+      });
+    }
+
+    const checkUrl = `https://graph.facebook.com/${process.env.GRAPH_API_VERSION}/${pageConfig.pageId}/subscribed_apps`;
+    
+    request.get(
+      {
+        uri: checkUrl,
+        qs: { access_token: pageConfig.pageToken }
+      },
+      (err, response, body) => {
+        if (!err && response.statusCode === 200) {
+          const data = JSON.parse(body);
+          console.log('✅ Subscription status retrieved');
+          res.json({ 
+            success: true,
+            pageId: pageConfig.pageId,
+            subscriptions: data.data || []
+          });
+        } else {
+          console.error('❌ Failed to check subscriptions:', err || body);
+          res.status(500).json({ 
+            success: false, 
+            error: err || body 
+          });
+        }
+      }
+    );
+  } catch (error) {
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
 // =======================
 // SERVER START
 // =======================
