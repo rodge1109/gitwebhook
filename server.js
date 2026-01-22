@@ -1,4 +1,5 @@
    // server.js
+ 
 require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
@@ -162,9 +163,9 @@ function formatBookingSMS(bookingData, config) {
         .replace(/[📅📱👤🍨📏📝⏰💇🎯✅❌]/g, '')
         .trim();
 
-        label = label.split(/\s+/).pop();  // keep the last word only
+      label = label.split(/\s+/).pop();  // keep the last word only
 
-console.log(label);
+      console.log(label);
       
       details.push(`${label}: ${answer}`);
     }
@@ -197,6 +198,23 @@ console.log(label);
 // =======================
 
 const bookingSessions = {};
+
+// ✅ CLEANUP STALE BOOKING SESSIONS
+const BOOKING_TIMEOUT = 30 * 60 * 1000; // 30 minutes
+
+function cleanupStaleSessions() {
+  const now = Date.now();
+  Object.keys(bookingSessions).forEach(psid => {
+    const session = bookingSessions[psid];
+    if (session.startedAt && (now - session.startedAt.getTime() > BOOKING_TIMEOUT)) {
+      delete bookingSessions[psid];
+      console.log(`🧹 Cleaned up stale session for ${psid}`);
+    }
+  });
+}
+
+// Run cleanup every 10 minutes
+setInterval(cleanupStaleSessions, 10 * 60 * 1000);
 
 /**
  * Initializes a new booking session for a user.
@@ -257,16 +275,20 @@ function validateMobileNumber(number) {
  * @returns {{valid: boolean, formatted: string | null}}
  */
 function validateDateFormat(dateString) {
-  // Regex to check for common date patterns (e.g., 12/25/2025, Dec 25, 2025)
-  const dateRegex = /^\s*(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}|\w+\s+\d{1,2},\s*\d{4})\s*$/i;
-
-  if (!dateRegex.test(dateString)) {
+  const cleaned = dateString.trim();
+  const parsedDate = new Date(cleaned);
+  
+  // Check if valid date
+  if (isNaN(parsedDate.getTime())) {
     return { valid: false };
   }
-
-  // Attempt to parse the date to ensure it's a real date
-  const parsedDate = new Date(dateString);
-  if (isNaN(parsedDate.getTime()) || parsedDate.getFullYear() < 2000) {
+  
+  // Check if date is in reasonable range
+  const now = new Date();
+  const minDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const maxDate = new Date(now.getFullYear() + 2, 11, 31);
+  
+  if (parsedDate < minDate || parsedDate > maxDate) {
     return { valid: false };
   }
 
@@ -323,7 +345,7 @@ function processBookingStep(psid, userMessage) {
 
       session.data[fieldName] = validation.formatted;
 
-    } else if (questionType === 'date') { // MODIFIED DATE VALIDATION
+    } else if (questionType === 'date') {
       const validation = validateDateFormat(userMessage);
 
       if (!validation.valid) {
@@ -371,7 +393,7 @@ function askQuestion(psid, stepIndex) {
       text: question + "\n\n(Please enter 11 digits, e.g., 09123456789)",
       validateMobile: true
     };
-  } else if (type === 'date') { // MODIFIED DATE PROMPT (Text input only)
+  } else if (type === 'date') {
     return {
       text: question + "\n\n(Please enter the date as MM/DD/YYYY or Month DD, YYYY. Example: 12/25/2025)",
       validateDate: true
@@ -460,9 +482,6 @@ function completeBooking(psid) {
 
   session.completed = true;
 
-  // Note: Booking session typically stays in memory until an external process
-  // (like saveOrder) retrieves the data, or a timeout clears it.
-
   return { text: summary };
 }
 
@@ -477,7 +496,6 @@ function processBooking(psid, userMessage) {
 
 /**
  * Placeholder for saving the order data to an external sheet (e.g., Google Sheets).
- * NOTE: This requires the 'sheets' object to be defined and configured.
  * @param {string} psid - User ID.
  * @param {Object} orderData - The collected data (session.data).
  * @param {string} bookingSheetId - ID of the Google Sheet.
@@ -497,8 +515,6 @@ async function saveOrder(psid, orderData, bookingSheetId) {
     console.log('Attempting to save to sheet:', bookingSheetId);
     console.log('Data to save:', values);
     
-    // NOTE: This assumes 'sheets' is an initialized Google Sheets API client
-    
     await sheets.spreadsheets.values.append({
       spreadsheetId: bookingSheetId,
       range: 'ConfirmedOrders!A:Z',
@@ -508,7 +524,6 @@ async function saveOrder(psid, orderData, bookingSheetId) {
         values: [values],
       },
     });
-    
     
     console.log(`Order saved successfully for PSID: ${psid}`);
     return true;
@@ -638,18 +653,31 @@ function sendTyping(senderPsid, pageToken) {
   );
 }
 
-function callSendAPI(senderPsid, response, pageToken, quickReplies = null, template = null) {
+function callSendAPI(senderPsid, response, pageToken, quickReplies = null, template = null, imageUrl = null) {
   let messageData = {
     recipient: { id: senderPsid }
   };
   
   if (template) {
     messageData.message = { attachment: template };
+  } else if (imageUrl) {
+    console.log('Sending image:', imageUrl);
+    messageData.message = {
+      attachment: {
+        type: 'image',
+        payload: {
+          url: imageUrl,
+          is_reusable: true
+        }
+      }
+    };
   } else if (quickReplies) {
     messageData.message = { text: response, quick_replies: quickReplies };
   } else {
     messageData.message = { text: response };
   }
+  
+  console.log('API Request Body:', JSON.stringify(messageData, null, 2));
   
   request(
     {
@@ -659,262 +687,334 @@ function callSendAPI(senderPsid, response, pageToken, quickReplies = null, templ
       json: messageData,
     },
     (err, res, body) => {
-      if (!err) console.log('Message sent!');
-      else console.error('Unable to send message:', err, body);
+      if (!err) {
+        console.log('Message sent! Response:', body);
+      }
+      else console.error('❌ Unable to send message:', err.message, body);
     }
   );
 }
+
+// =======================
+// ✅ IMPROVED COMMENT REPLY FUNCTION
+// =======================
+
+function replyToComment(commentId, message, pageToken) {
+  return new Promise((resolve, reject) => {
+    const messageData = {
+      message: message
+    };
+
+    console.log(`Replying to comment ${commentId}:`, message);
+
+    request(
+      {
+        uri: `https://graph.facebook.com/${process.env.GRAPH_API_VERSION}/${commentId}/private_replies`,
+        qs: { access_token: pageToken },
+        method: 'POST',
+        json: messageData,
+      },
+      (err, res, body) => {
+        if (!err && body && !body.error) {
+          console.log('✅ Comment reply sent! Response:', body);
+          resolve(body);
+        } else {
+          console.error('❌ Unable to send comment reply:', err || body?.error);
+          reject(err || body?.error);
+        }
+      }
+    );
+  });
+}
+
+// =======================
+// ✅ COMMENT DUPLICATE PROTECTION
+// =======================
+
+const processedComments = new Set();
+
+// Clean up processed comments every hour to prevent memory bloat
+setInterval(() => {
+  console.log(`🧹 Clearing processed comments cache (${processedComments.size} entries)`);
+  processedComments.clear();
+}, 60 * 60 * 1000);
+
  
 // =======================
-// WEBHOOK HANDLERS
+// Webhook handler
 // =======================
-
-app.get('/webhook', (req, res) => {
-  const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
-  const mode = req.query['hub.mode'];
-  const token = req.query['hub.verify_token'];
-  const challenge = req.query['hub.challenge'];
-
-  if (mode && token) {
-    if (mode === 'subscribe' && token === VERIFY_TOKEN) {
-      console.log('WEBHOOK_VERIFIED');
-      res.status(200).send(challenge);
-    } else {
-      res.sendStatus(403);
-    }
-  }
-});
-
 app.post('/webhook', async (req, res) => {
   const body = req.body;
-  console.log('Incoming webhook:', JSON.stringify(body, null, 2));
 
+  // Initialize the processedComments set
+  const processedComments = new Set();
+
+  // Check for valid object type
   if (body.object === 'page') {
     for (const entry of body.entry) {
       const pageId = entry.id;
-      const config = await getPageConfig(pageId);
+      const pageToken = await getPageToken(pageId);
 
-      if (!config) {
-        console.error(`No config found for page ${pageId}`);
-        continue;
-      }
-
-      const { pageToken, keywordsSheetId } = config;
-      const bookingSheetId = config.bookingSheetId || keywordsSheetId;
-
-      for (const messaging of entry.messaging) {
-        if (messaging.postback) {
+      // Handle Messenger messages and postbacks
+      if (entry.messaging) {
+        for (const messaging of entry.messaging) {
           const senderPsid = messaging.sender.id;
-          const payload = messaging.postback.payload;
-          
-          console.log(`Postback received: ${payload}`);
-          
-          if (payload === 'BOOKING_YES') {
-            if (bookingSessions[senderPsid] && bookingSessions[senderPsid].step === 0) {
-              const nextQuestion = askQuestion(senderPsid, 1);
-              bookingSessions[senderPsid].step = 1;
-              
-              sendTyping(senderPsid, pageToken);
-              setTimeout(() => {
-                if (nextQuestion.template) {
-                  callSendAPI(senderPsid, null, pageToken, null, nextQuestion.template);
-                } else if (nextQuestion.quickReplies) {
-                  callSendAPI(senderPsid, nextQuestion.text, pageToken, nextQuestion.quickReplies);
-                } else {
-                  callSendAPI(senderPsid, nextQuestion.text, pageToken);
-                }
-              }, 1000);
-            }
-          } else if (payload === 'BOOKING_NO') {
-            delete bookingSessions[senderPsid];
-            sendTyping(senderPsid, pageToken);
-            setTimeout(() => {
-              callSendAPI(senderPsid, "Booking cancelled. No problem! Feel free to book anytime.", pageToken);
-            }, 1000);
-          } else if (payload.startsWith('BOOKING_ANSWER_')) {
-            const answer = payload.replace('BOOKING_ANSWER_', '').replace(/_/g, ' ');
 
-            // Check if it's "Other date" button
-            if (answer === 'Other date' || payload === 'BOOKING_ANSWER_CUSTOM_DATE') {
-              bookingSessions[senderPsid].waitingForCustomDate = true;
-              
-              sendTyping(senderPsid, pageToken);
-              setTimeout(() => {
-                callSendAPI(senderPsid, "Please type your preferred date (e.g., December 15, 2025):", pageToken);
-              }, 1000);
-              continue;
-            }
+          if (messaging.postback) {
+            const payload = messaging.postback.payload;
+            console.log(`Postback received: ${payload}`);
 
-            if (bookingSessions[senderPsid]) {
-              const currentStep = bookingSessions[senderPsid].step;
-              const stepConfig = bookingSessions[senderPsid].config[currentStep - 1];
-              if (stepConfig) {
-                bookingSessions[senderPsid].data[stepConfig[0]] = answer;
-              }
-              
-              const nextQuestion = processBookingStep(senderPsid, answer);
-              
-              sendTyping(senderPsid, pageToken);
-              setTimeout(() => {
-                if (nextQuestion.template) {
-                  callSendAPI(senderPsid, null, pageToken, null, nextQuestion.template);
-                } else if (nextQuestion.quickReplies) {
-                  callSendAPI(senderPsid, nextQuestion.text, pageToken, nextQuestion.quickReplies);
-                } else {
-                  callSendAPI(senderPsid, nextQuestion.text, pageToken);
-                }
-              }, 1000);
-            }
-          }
-          continue;
-        }
-        
-        if (messaging.message && messaging.message.text) {
-          const senderPsid = messaging.sender.id;
-          const receivedText = messaging.message.text.toLowerCase().trim();
-          
-          if (receivedText === 'refresh data') {
-            await getKeywords(keywordsSheetId, true);
-            sendTyping(senderPsid, pageToken);
-            setTimeout(() => callSendAPI(senderPsid, 'Keywords refreshed!', pageToken), 1500);
-            console.log('Keywords refreshed');
-            continue;
-          }
-          
-          if (bookingSessions[senderPsid]) {
-            console.log(`Processing booking step: ${bookingSessions[senderPsid].step}`);
+            if (payload === 'BOOKING_YES') {
+              // Booking flow for YES
+              if (bookingSessions[senderPsid] && bookingSessions[senderPsid].step === 0) {
+                const nextQuestion = askQuestion(senderPsid, 1);
+                bookingSessions[senderPsid].step = 1;
 
-            // Check if waiting for custom date
-            if (bookingSessions[senderPsid].waitingForCustomDate) {
-              const customDate = messaging.message.text;
-              const currentStep = bookingSessions[senderPsid].step;
-              const stepConfig = bookingSessions[senderPsid].config[currentStep - 1];
-              
-              // Save the custom date - FIXED: use stepConfig[0] not stepConfig[1]
-              if (stepConfig) {
-                bookingSessions[senderPsid].data[stepConfig[0]] = customDate;
+                sendTyping(senderPsid, pageToken);
+                setTimeout(() => {
+                  if (nextQuestion.template) {
+                    callSendAPI(senderPsid, null, pageToken, null, nextQuestion.template);
+                  } else if (nextQuestion.quickReplies) {
+                    callSendAPI(senderPsid, nextQuestion.text, pageToken, nextQuestion.quickReplies);
+                  } else {
+                    callSendAPI(senderPsid, nextQuestion.text, pageToken);
+                  }
+                }, 1000);
               }
-              
-              // Clear the flag
-              delete bookingSessions[senderPsid].waitingForCustomDate;
-              
-              // Move to next question
-              bookingSessions[senderPsid].step++;
-              const nextQuestion = askQuestion(senderPsid, bookingSessions[senderPsid].step);
-              
-              sendTyping(senderPsid, pageToken);
-              setTimeout(() => {
-                if (nextQuestion.template) {
-                  callSendAPI(senderPsid, null, pageToken, null, nextQuestion.template);
-                } else if (nextQuestion.quickReplies) {
-                  callSendAPI(senderPsid, nextQuestion.text, pageToken, nextQuestion.quickReplies);
-                } else {
-                  callSendAPI(senderPsid, nextQuestion.text, pageToken);
-                }
-              }, 1500);
-              continue;
-            }
-
-            const bookingReply = processBooking(senderPsid, messaging.message.text);
-            
-            if (bookingSessions[senderPsid] && bookingSessions[senderPsid].completed) {
-              const session = bookingSessions[senderPsid];
-              console.log('Booking completed! Saving...');
-              
-              const saveResult = await saveOrder(senderPsid, session.data, bookingSheetId);
-              
-              if (saveResult) {
-                console.log('Saved to Google Sheets!');
-              } else {
-                console.error('FAILED to save!');
-              }
-              
-              if (session.mobileNumber && process.env.SEMAPHORE_API_KEY) {
-                const smsMessage = formatBookingSMS(session.data, session.config);
-                const smsResult = await sendSMS(session.mobileNumber, smsMessage);
-                
-                if (smsResult.success) {
-                  console.log(`SMS sent to ${session.mobileNumber}`);
-                }
-              }
-              
+            } else if (payload === 'BOOKING_NO') {
+              // Booking flow for NO
               delete bookingSessions[senderPsid];
-            }
-            
-            sendTyping(senderPsid, pageToken);
-            setTimeout(() => {
-              if (bookingReply.template) {
-                callSendAPI(senderPsid, null, pageToken, null, bookingReply.template);
-              } else if (bookingReply.quickReplies) {
-                callSendAPI(senderPsid, bookingReply.text, pageToken, bookingReply.quickReplies);
-              } else {
-                callSendAPI(senderPsid, bookingReply.text, pageToken);
+              sendTyping(senderPsid, pageToken);
+              setTimeout(() => {
+                callSendAPI(senderPsid, "Booking cancelled. No problem! Feel free to book anytime.", pageToken);
+              }, 1000);
+            } else if (payload.startsWith('BOOKING_ANSWER_')) {
+              // Handle booking answers
+              const answer = payload.replace('BOOKING_ANSWER_', '').replace(/_/g, ' ');
+
+              if (answer === 'Other date' || payload === 'BOOKING_ANSWER_CUSTOM_DATE') {
+                bookingSessions[senderPsid].waitingForCustomDate = true;
+                sendTyping(senderPsid, pageToken);
+                setTimeout(() => {
+                  callSendAPI(senderPsid, "Please type your preferred date (e.g., December 15, 2025):", pageToken);
+                }, 1000);
+                continue;
               }
-            }, 1500);
+
+              if (bookingSessions[senderPsid]) {
+                const currentStep = bookingSessions[senderPsid].step;
+                const stepConfig = bookingSessions[senderPsid].config[currentStep - 1];
+                if (stepConfig) {
+                  bookingSessions[senderPsid].data[stepConfig[0]] = answer;
+                }
+
+                const nextQuestion = processBookingStep(senderPsid, answer);
+
+                sendTyping(senderPsid, pageToken);
+                setTimeout(() => {
+                  if (nextQuestion.template) {
+                    callSendAPI(senderPsid, null, pageToken, null, nextQuestion.template);
+                  } else if (nextQuestion.quickReplies) {
+                    callSendAPI(senderPsid, nextQuestion.text, pageToken, nextQuestion.quickReplies);
+                  } else {
+                    callSendAPI(senderPsid, nextQuestion.text, pageToken);
+                  }
+                }, 1000);
+              }
+            }
             continue;
           }
-          
-          console.log('New message from:', senderPsid);
-          await logPSID(senderPsid);
 
-          const keywords = await getKeywords(keywordsSheetId);
-          
-          if (receivedText.includes('order') || receivedText.includes('book')) {
-            const bookingConfig = await getBookingConfig(bookingSheetId);
-            
-            if (bookingConfig && bookingConfig.length > 0) {
-              const bookingReply = await startBooking(senderPsid, bookingConfig);
+          // Handle text messages
+          if (messaging.message && messaging.message.text) {
+            const receivedText = messaging.message.text.toLowerCase().trim();
+
+            // Refresh keywords on 'refresh data' command
+            if (receivedText === 'refresh data') {
+              await getKeywords(keywordsSheetId, true);
+              sendTyping(senderPsid, pageToken);
+              setTimeout(() => callSendAPI(senderPsid, 'Keywords refreshed!', pageToken), 1500);
+              console.log('Keywords refreshed');
+              continue;
+            }
+
+            // Handle booking session
+            if (bookingSessions[senderPsid]) {
+              console.log(`Processing booking step: ${bookingSessions[senderPsid].step}`);
+
+              // Check if waiting for a custom date
+              if (bookingSessions[senderPsid].waitingForCustomDate) {
+                const customDate = messaging.message.text;
+
+                // Validate the custom date
+                const validation = validateDateFormat(customDate);
+                if (!validation.valid) {
+                  sendTyping(senderPsid, pageToken);
+                  setTimeout(() => {
+                    callSendAPI(senderPsid,
+                      "Invalid date format!\n\nPlease enter the date using a standard format like **MM/DD/YYYY** or **Month DD, YYYY**.\nExample: 12/25/2025 or December 25, 2025",
+                      pageToken);
+                  }, 1000);
+                  continue;
+                }
+
+                // Save valid date and move to next step
+                const currentStep = bookingSessions[senderPsid].step;
+                const stepConfig = bookingSessions[senderPsid].config[currentStep - 1];
+
+                if (stepConfig) {
+                  bookingSessions[senderPsid].data[stepConfig[0]] = validation.formatted;
+                }
+
+                delete bookingSessions[senderPsid].waitingForCustomDate;
+
+                bookingSessions[senderPsid].step++;
+                const nextQuestion = askQuestion(senderPsid, bookingSessions[senderPsid].step);
+
+                sendTyping(senderPsid, pageToken);
+                setTimeout(() => {
+                  if (nextQuestion.template) {
+                    callSendAPI(senderPsid, null, pageToken, null, nextQuestion.template);
+                  } else if (nextQuestion.quickReplies) {
+                    callSendAPI(senderPsid, nextQuestion.text, pageToken, nextQuestion.quickReplies);
+                  } else {
+                    callSendAPI(senderPsid, nextQuestion.text, pageToken);
+                  }
+                }, 1500);
+                continue;
+              }
+
+              // Proceed with booking if not waiting for a custom date
+              const bookingReply = processBooking(senderPsid, messaging.message.text);
+
+              if (bookingSessions[senderPsid] && bookingSessions[senderPsid].completed) {
+                const session = bookingSessions[senderPsid];
+                console.log('Booking completed! Saving...');
+
+                const saveResult = await saveOrder(senderPsid, session.data, bookingSheetId);
+
+                if (saveResult) {
+                  console.log('Saved to Google Sheets!');
+                } else {
+                  console.error('FAILED to save!');
+                }
+
+                if (session.mobileNumber && process.env.SEMAPHORE_API_KEY) {
+                  const smsMessage = formatBookingSMS(session.data, session.config);
+                  const smsResult = await sendSMS(session.mobileNumber, smsMessage);
+
+                  if (smsResult.success) {
+                    console.log(`SMS sent to ${session.mobileNumber}`);
+                  }
+                }
+
+                delete bookingSessions[senderPsid];
+              }
+
               sendTyping(senderPsid, pageToken);
               setTimeout(() => {
                 if (bookingReply.template) {
                   callSendAPI(senderPsid, null, pageToken, null, bookingReply.template);
+                } else if (bookingReply.quickReplies) {
+                  callSendAPI(senderPsid, bookingReply.text, pageToken, bookingReply.quickReplies);
                 } else {
                   callSendAPI(senderPsid, bookingReply.text, pageToken);
                 }
               }, 1500);
-            } else {
-              sendTyping(senderPsid, pageToken);
-              setTimeout(() => {
-                callSendAPI(senderPsid, "Sorry, booking is not available at the moment.", pageToken);
-              }, 1500);
+              continue;
             }
-            continue;
-          }
 
-          const match = keywords.find(row => {
-            if (!row[0]) return false;
-            const keywordList = row[0].toLowerCase().split(',').map(k => k.trim());
-            return keywordList.some(keyword => receivedText.includes(keyword));
-          });
+            console.log('New message from:', senderPsid);
+            await logPSID(senderPsid);
 
-          let reply = "Sorry, I didn't understand that. Try another keyword!";
-          
-          if (match) {
-            const action = match[2] ? match[2].trim().toLowerCase() : null;
-            
-            if (action) {
-              const actionResult = await executeSpecialAction(action);
-              reply = actionResult || match[1];
-            } else if (match[1]) {
-              const responses = match[1].split('|').map(r => r.trim());
-              reply = responses[Math.floor(Math.random() * responses.length)];
+            const keywords = await getKeywords(keywordsSheetId);
+
+            // Check for order or booking commands
+            if (receivedText.includes('order') || receivedText.includes('book')) {
+              const bookingConfig = await getBookingConfig(bookingSheetId);
+
+              if (bookingConfig && bookingConfig.length > 0) {
+                const bookingReply = await startBooking(senderPsid, bookingConfig);
+                sendTyping(senderPsid, pageToken);
+                setTimeout(() => {
+                  if (bookingReply.template) {
+                    callSendAPI(senderPsid, null, pageToken, null, bookingReply.template);
+                  } else {
+                    callSendAPI(senderPsid, bookingReply.text, pageToken);
+                  }
+                }, 1500);
+              } else {
+                sendTyping(senderPsid, pageToken);
+                setTimeout(() => {
+                  callSendAPI(senderPsid, "Sorry, booking is not available at the moment.", pageToken);
+                }, 1500);
+              }
+              continue;
             }
-          }
 
-          sendTyping(senderPsid, pageToken);
-          setTimeout(() => callSendAPI(senderPsid, reply, pageToken), 1500);
+            // Keyword matching logic
+            const match = keywords.find(row => {
+              if (!row[0]) return false;
+              const keywordList = row[0].toLowerCase().split(',').map(k => k.trim());
+              return keywordList.some(keyword => receivedText.includes(keyword));
+            });
+
+            let reply = "Sorry, I didn't understand that. Can you please rephrase?";
+            let imageUrls = [];
+
+            if (match) {
+              const column_c = match[2] ? match[2].trim() : null;
+
+              console.log('Column C value:', column_c);
+
+              if (column_c && (column_c.startsWith('http://') || column_c.startsWith('https://') || column_c.includes('drive.google.com'))) {
+                imageUrls = column_c.split('|').map(url => url.trim()).filter(url => url.length > 0);
+                console.log('Image URLs detected:', imageUrls);
+              }
+
+              const action = column_c && imageUrls.length === 0 ? column_c.toLowerCase() : null;
+
+              if (action && imageUrls.length === 0) {
+                const actionResult = await executeSpecialAction(action);
+                reply = actionResult || match[1];
+              } else if (match[1]) {
+                const responses = match[1].split('|').map(r => r.trim());
+                reply = responses[Math.floor(Math.random() * responses.length)];
+              }
+            }
+
+            sendTyping(senderPsid, pageToken);
+            setTimeout(() => {
+              callSendAPI(senderPsid, reply, pageToken);
+
+              if (imageUrls.length > 0) {
+                imageUrls.forEach(url => {
+                  callSendAPI(senderPsid, null, pageToken, null, null, url);
+                });
+              }
+            }, 1500);
+          }
         }
       }
     }
-
-    res.sendStatus(200);
-  } else {
-    res.sendStatus(404);
   }
+  res.sendStatus(200);
 });
-
+ 
 // =======================
-// SERVER
+// SERVER START
 // =======================
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Webhook server running on port ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`\n${'='.repeat(80)}`);
+  console.log(`✅ Server running on port ${PORT}`);
+  console.log(`✅ Graph API: ${process.env.GRAPH_API_VERSION || 'v21.0'}`);
+  console.log(`${'='.repeat(80)}\n`);
+  console.log(`📋 Available endpoints:`);
+  console.log(`   GET  /webhook              - Webhook verification`);
+  console.log(`   POST /webhook              - Receive events`);
+  console.log(`   GET  /health               - Health check`);
+  console.log(`   GET  /subscribe-feed       - Subscribe pages to feed`);
+  console.log(`   GET  /check-subscriptions  - Check subscription status`);
+  console.log(`${'='.repeat(80)}\n`);
+});
