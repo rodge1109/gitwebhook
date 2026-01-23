@@ -1056,8 +1056,80 @@ if (messaging.message && messaging.message.text) {
     }
   }, 1500);
 }
+              }
+      }
+
+      // ==========================================
+      // Handle Facebook Post Comments
+      // ==========================================
+      if (entry.changes) {
+        for (const change of entry.changes) {
+          console.log('📝 Change detected:', change.field);
+
+          // Handle feed comments
+          if (change.field === 'feed' && change.value) {
+            const value = change.value;
+            
+            // Check if this is a comment
+            if (value.item === 'comment' && value.comment_id) {
+              const commentId = value.comment_id;
+              const commentText = value.message || '';
+              const senderId = value.from?.id;
+              const postId = value.post_id;
+
+              console.log(`💬 Comment received on post ${postId}`);
+              console.log(`   Comment ID: ${commentId}`);
+              console.log(`   From: ${senderId}`);
+              console.log(`   Text: ${commentText}`);
+
+              // Prevent duplicate processing
+              if (processedComments.has(commentId)) {
+                console.log(`⏭️  Comment ${commentId} already processed, skipping`);
+                continue;
+              }
+
+              // Mark as processed
+              processedComments.add(commentId);
+
+              // Get page config
+              const pageConfig = await getPageConfig(pageId);
+              const keywordsSheetId = pageConfig?.keywordsSheetId;
+
+              if (!keywordsSheetId) {
+                console.error(`❌ No keywords sheet configured for page ${pageId}`);
+                continue;
+              }
+
+              // Get keywords
+              const keywords = await getKeywords(keywordsSheetId);
+              const receivedText = commentText.toLowerCase().trim();
+
+              // Find matching keyword
+              const match = keywords.find(row => {
+                if (!row[0]) return false;
+                const keywordList = row[0].toLowerCase().split(',').map(k => k.trim());
+                return keywordList.some(keyword => receivedText.includes(keyword));
+              });
+
+              let reply = "Thanks for your comment! 😊";
+
+              if (match && match[1]) {
+                const responses = match[1].split('|').map(r => r.trim());
+                reply = responses[Math.floor(Math.random() * responses.length)];
+              }
+
+              // Send private reply to comment
+              try {
+                await replyToComment(commentId, reply, pageToken);
+                console.log(`✅ Replied to comment ${commentId}`);
+              } catch (error) {
+                console.error(`❌ Failed to reply to comment ${commentId}:`, error);
+              }
+            }
+          }
         }
       }
+
     }
   }
   res.sendStatus(200);
