@@ -701,26 +701,41 @@ function callSendAPI(senderPsid, response, pageToken, quickReplies = null, templ
 
 function replyToComment(commentId, message, pageToken) {
   return new Promise((resolve, reject) => {
-    const messageData = {
-      message: message
-    };
-
     console.log(`Replying to comment ${commentId}:`, message);
 
+    // Try private reply first
     request(
       {
         uri: `https://graph.facebook.com/${process.env.GRAPH_API_VERSION}/${commentId}/private_replies`,
         qs: { access_token: pageToken },
         method: 'POST',
-        json: messageData,
+        json: { message: message }
       },
       (err, res, body) => {
         if (!err && body && !body.error) {
-          console.log('✅ Comment reply sent! Response:', body);
+          console.log('✅ Private reply sent! Response:', body);
           resolve(body);
         } else {
-          console.error('❌ Unable to send comment reply:', err || body?.error);
-          reject(err || body?.error);
+          console.log('⚠️ Private reply failed, trying public reply...');
+          
+          // Fallback to public reply
+          request(
+            {
+              uri: `https://graph.facebook.com/${process.env.GRAPH_API_VERSION}/${commentId}/comments`,
+              qs: { access_token: pageToken },
+              method: 'POST',
+              json: { message: message }
+            },
+            (err2, res2, body2) => {
+              if (!err2 && body2 && !body2.error) {
+                console.log('✅ Public reply sent! Response:', body2);
+                resolve(body2);
+              } else {
+                console.error('❌ Both reply methods failed:', body2?.error || err2);
+                reject(err2 || body2?.error);
+              }
+            }
+          );
         }
       }
     );
