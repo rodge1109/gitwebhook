@@ -1097,6 +1097,13 @@ if (messaging.message && messaging.message.text) {
               console.log(`   From: ${senderId}`);
               console.log(`   Text: ${commentText}`);
 
+
+ // 🛑 Skip if comment is from the page itself (prevent infinite loop)
+  if (senderId === pageId) {
+    console.log(`⏭️  Skipping comment from page itself`);
+    continue;
+  }
+
               // Prevent duplicate processing
               if (processedComments.has(commentId)) {
                 console.log(`⏭️  Comment ${commentId} already processed, skipping`);
