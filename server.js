@@ -743,6 +743,243 @@ function replyToComment(commentId, message, pageToken) {
 }
 
 // =======================
+// AUTO-POST TO FACEBOOK PAGE
+// =======================
+
+/**
+ * Post text to Facebook Page
+ */
+async function postToFacebook(pageId, pageToken, message) {
+  return new Promise((resolve, reject) => {
+    request(
+      {
+        uri: `https://graph.facebook.com/${process.env.GRAPH_API_VERSION}/${pageId}/feed`,
+        qs: { access_token: pageToken },
+        method: 'POST',
+        json: { message: message }
+      },
+      (err, res, body) => {
+        if (!err && body && !body.error) {
+          console.log('✅ Post published! Post ID:', body.id);
+          resolve(body);
+        } else {
+          console.error('❌ Failed to post:', err || body?.error);
+          reject(err || body?.error);
+        }
+      }
+    );
+  });
+}
+
+/**
+ * Post image to Facebook Page
+ */
+async function postImageToFacebook(pageId, pageToken, imageUrl, caption = '') {
+  return new Promise((resolve, reject) => {
+    request(
+      {
+        uri: `https://graph.facebook.com/${process.env.GRAPH_API_VERSION}/${pageId}/photos`,
+        qs: { access_token: pageToken },
+        method: 'POST',
+        json: {
+          url: imageUrl,
+          caption: caption
+        }
+      },
+      (err, res, body) => {
+        if (!err && body && !body.error) {
+          console.log('✅ Image posted! Post ID:', body.id);
+          resolve(body);
+        } else {
+          console.error('❌ Failed to post image:', err || body?.error);
+          reject(err || body?.error);
+        }
+      }
+    );
+  });
+}
+
+/**
+ * Post multiple images as album
+ */
+async function postMultipleImagesToFacebook(pageId, pageToken, imageUrls, message = '') {
+  try {
+    const photoIds = [];
+    
+    for (const imageUrl of imageUrls) {
+      const result = await new Promise((resolve, reject) => {
+        request(
+          {
+            uri: `https://graph.facebook.com/${process.env.GRAPH_API_VERSION}/${pageId}/photos`,
+            qs: { access_token: pageToken },
+            method: 'POST',
+            json: {
+              url: imageUrl,
+              published: false
+            }
+          },
+          (err, res, body) => {
+            if (!err && body && !body.error) {
+              resolve(body.id);
+            } else {
+              reject(err || body?.error);
+            }
+          }
+        );
+      });
+      
+      photoIds.push({ media_fbid: result });
+    }
+    
+    return new Promise((resolve, reject) => {
+      request(
+        {
+          uri: `https://graph.facebook.com/${process.env.GRAPH_API_VERSION}/${pageId}/feed`,
+          qs: { access_token: pageToken },
+          method: 'POST',
+          json: {
+            message: message,
+            attached_media: photoIds
+          }
+        },
+        (err, res, body) => {
+          if (!err && body && !body.error) {
+            console.log('✅ Album posted! Post ID:', body.id);
+            resolve(body);
+          } else {
+            console.error('❌ Failed to post album:', err || body?.error);
+            reject(err || body?.error);
+          }
+        }
+      );
+    });
+  } catch (error) {
+    console.error('❌ Error posting album:', error);
+    throw error;
+  }
+}
+
+// =======================
+// SCHEDULED POSTS CHECKER
+// =======================
+
+async function checkScheduledPosts() {
+  try {
+    console.log('🔍 Checking for scheduled posts...');
+    
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId: process.env.SHEET_ID,
+      range: 'ScheduledPosts!A:E',
+    });
+    
+    const rows = res.data.values || [];
+    
+    if (rows.length <= 1) {
+      console.log('📭 No scheduled posts found');
+      return;
+    }
+    
+    const now = new Date();
+    const header = rows[0];
+    
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i];
+      const [scheduledTime, type, message, imageUrls, posted] = row;
+      
+      // Skip if already posted
+      if (posted && posted.toLowerCase() === 'yes') {
+        continue;
+      }
+      
+      // Skip if no scheduled time
+      if (!scheduledTime || !type || !message) {
+        continue;
+      }
+      
+      // Parse scheduled time
+      const postTime = new Date(scheduledTime);
+      
+      // Check if it's time to post (within last 10 minutes and not in future)
+      const timeDiff = now - postTime;
+      const tenMinutes = 10 * 60 * 1000;
+      
+      if (timeDiff >= 0 && timeDiff <= tenMinutes) {
+        console.log(`📅 Time to post: "${message}"`);
+        
+        try {
+          const pageConfig = await getPageConfig(process.env.PAGE_ID);
+          
+          if (!pageConfig) {
+            console.error('❌ Page config not found');
+            continue;
+          }
+          
+          let postResult;
+          
+          if (type === 'text') {
+            postResult = await postToFacebook(
+              pageConfig.pageId,
+              pageConfig.pageToken,
+              message
+            );
+          } else if (type === 'image') {
+            if (!imageUrls) {
+              console.error('❌ No image URL provided for image post');
+              continue;
+            }
+            postResult = await postImageToFacebook(
+              pageConfig.pageId,
+              pageConfig.pageToken,
+              imageUrls,
+              message
+            );
+          } else if (type === 'album') {
+            if (!imageUrls) {
+              console.error('❌ No image URLs provided for album post');
+              continue;
+            }
+            const urls = imageUrls.split('|').map(url => url.trim());
+            postResult = await postMultipleImagesToFacebook(
+              pageConfig.pageId,
+              pageConfig.pageToken,
+              urls,
+              message
+            );
+          } else {
+            console.error(`❌ Unknown post type: ${type}`);
+            continue;
+          }
+          
+          // Mark as posted in sheet
+          await sheets.spreadsheets.values.update({
+            spreadsheetId: process.env.SHEET_ID,
+            range: `ScheduledPosts!E${i + 1}`,
+            valueInputOption: 'RAW',
+            resource: {
+              values: [['YES']]
+            }
+          });
+          
+          console.log(`✅ Scheduled post published successfully! Post ID: ${postResult.id}`);
+          
+        } catch (error) {
+          console.error(`❌ Error posting scheduled content:`, error);
+        }
+      }
+    }
+    
+  } catch (error) {
+    console.error('❌ Error checking scheduled posts:', error);
+  }
+}
+
+// Run scheduler every 5 minutes
+setInterval(checkScheduledPosts, 5 * 60 * 1000);
+
+// Run once on startup
+checkScheduledPosts();
+
+// =======================
 // ✅ COMMENT DUPLICATE PROTECTION
 // =======================
 
