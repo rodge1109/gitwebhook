@@ -860,120 +860,140 @@ async function postMultipleImagesToFacebook(pageId, pageToken, imageUrls, messag
 }
 
 // =======================
-// SCHEDULED POSTS CHECKER
+// SCHEDULED POSTS CHECKER (Multi-Page Support)
 // =======================
+
 async function checkScheduledPosts() {
   try {
-    console.log('🔍 Checking for scheduled posts...');
+    console.log('🔍 Checking for scheduled posts across all pages...');
     
-    // Get the keywords sheet ID from page config
-    const pageConfig = await getPageConfig(process.env.PAGE_ID);
-    
-    if (!pageConfig || !pageConfig.keywordsSheetId) {
-      console.error('❌ No keywords sheet ID found in config');
-      return;
-    }
-    
-    const res = await sheets.spreadsheets.values.get({
-      spreadsheetId: pageConfig.keywordsSheetId,  // ← Use keywords sheet ID
-      range: 'ScheduledPosts!A:E',
+    // Get all pages from WebhookConfig
+    const configRes = await sheets.spreadsheets.values.get({
+      spreadsheetId: process.env.SHEET_ID,
+      range: 'WebhookConfig!A:D',
     });
     
-    const rows = res.data.values || [];
+    const configRows = configRes.data.values || [];
     
-    if (rows.length <= 1) {
-      console.log('📭 No scheduled posts found');
+    if (configRows.length <= 1) {
+      console.log('❌ No pages found in WebhookConfig');
       return;
     }
     
-    const now = new Date();
-    
-    for (let i = 1; i < rows.length; i++) {
-      const row = rows[i];
-      const [scheduledTime, type, message, imageUrls, posted] = row;
+    // Loop through each page (skip header row)
+    for (let p = 1; p < configRows.length; p++) {
+      const [pageId, pageToken, keywordsSheetId, bookingSheetId] = configRows[p];
       
-      // Skip if already posted
-      if (posted && posted.toLowerCase() === 'yes') {
+      if (!pageId || !pageToken || !keywordsSheetId) {
+        console.log(`⏭️  Skipping incomplete config row ${p}`);
         continue;
       }
       
-      // Skip if no scheduled time
-      if (!scheduledTime || !type || !message) {
-        continue;
-      }
+      console.log(`📄 Checking scheduled posts for page: ${pageId}`);
       
-      // Parse scheduled time
-      const postTime = new Date(scheduledTime);
-      
-      // Check if it's time to post (within last 10 minutes and not in future)
-      const timeDiff = now - postTime;
-      const tenMinutes = 10 * 60 * 1000;
-      
-      if (timeDiff >= 0 && timeDiff <= tenMinutes) {
-        console.log(`📅 Time to post: "${message}"`);
+      try {
+        // Get scheduled posts from the keywords sheet
+        const res = await sheets.spreadsheets.values.get({
+          spreadsheetId: keywordsSheetId,
+          range: 'ScheduledPosts!A:E',
+        });
         
-        try {
-          if (!pageConfig) {
-            console.error('❌ Page config not found');
+        const rows = res.data.values || [];
+        
+        if (rows.length <= 1) {
+          console.log(`  📭 No scheduled posts found for page ${pageId}`);
+          continue;
+        }
+        
+        const now = new Date();
+        let postsFound = 0;
+        
+        // Check each scheduled post
+        for (let i = 1; i < rows.length; i++) {
+          const row = rows[i];
+          const [scheduledTime, type, message, imageUrls, posted] = row;
+          
+          // Skip if already posted
+          if (posted && posted.toLowerCase() === 'yes') {
             continue;
           }
           
-          let postResult;
-          
-          if (type === 'text') {
-            postResult = await postToFacebook(
-              pageConfig.pageId,
-              pageConfig.pageToken,
-              message
-            );
-          } else if (type === 'image') {
-            if (!imageUrls) {
-              console.error('❌ No image URL provided for image post');
-              continue;
-            }
-            postResult = await postImageToFacebook(
-              pageConfig.pageId,
-              pageConfig.pageToken,
-              imageUrls,
-              message
-            );
-          } else if (type === 'album') {
-            if (!imageUrls) {
-              console.error('❌ No image URLs provided for album post');
-              continue;
-            }
-            const urls = imageUrls.split('|').map(url => url.trim());
-            postResult = await postMultipleImagesToFacebook(
-              pageConfig.pageId,
-              pageConfig.pageToken,
-              urls,
-              message
-            );
-          } else {
-            console.error(`❌ Unknown post type: ${type}`);
+          // Skip if incomplete
+          if (!scheduledTime || !type || !message) {
             continue;
           }
           
-          // Mark as posted in sheet
-          await sheets.spreadsheets.values.update({
-            spreadsheetId: pageConfig.keywordsSheetId,  // ← Use keywords sheet ID
-            range: `ScheduledPosts!E${i + 1}`,
-            valueInputOption: 'RAW',
-            resource: {
-              values: [['YES']]
+          // Parse scheduled time
+          const postTime = new Date(scheduledTime);
+          
+          // Check if it's time to post (within last 10 minutes)
+          const timeDiff = now - postTime;
+          const tenMinutes = 10 * 60 * 1000;
+          
+          if (timeDiff >= 0 && timeDiff <= tenMinutes) {
+            postsFound++;
+            console.log(`  📅 Time to post for page ${pageId}: "${message.substring(0, 50)}..."`);
+            
+            try {
+              let postResult;
+              
+              // Post based on type
+              if (type === 'text') {
+                postResult = await postToFacebook(pageId, pageToken, message);
+              } else if (type === 'image') {
+                if (!imageUrls) {
+                  console.error('  ❌ No image URL provided for image post');
+                  continue;
+                }
+                postResult = await postImageToFacebook(pageId, pageToken, imageUrls, message);
+              } else if (type === 'album') {
+                if (!imageUrls) {
+                  console.error('  ❌ No image URLs provided for album post');
+                  continue;
+                }
+                const urls = imageUrls.split('|').map(url => url.trim());
+                postResult = await postMultipleImagesToFacebook(pageId, pageToken, urls, message);
+              } else {
+                console.error(`  ❌ Unknown post type: ${type}`);
+                continue;
+              }
+              
+              // Mark as posted
+              await sheets.spreadsheets.values.update({
+                spreadsheetId: keywordsSheetId,
+                range: `ScheduledPosts!E${i + 1}`,
+                valueInputOption: 'RAW',
+                resource: {
+                  values: [['YES']]
+                }
+              });
+              
+              console.log(`  ✅ Post published! Post ID: ${postResult.id}`);
+              
+            } catch (error) {
+              console.error(`  ❌ Error posting:`, error.message);
             }
-          });
-          
-          console.log(`✅ Scheduled post published successfully! Post ID: ${postResult.id}`);
-          
-        } catch (error) {
-          console.error(`❌ Error posting scheduled content:`, error);
+          }
+        }
+        
+        if (postsFound === 0) {
+          console.log(`  ⏰ No posts ready to publish for page ${pageId}`);
+        }
+        
+      } catch (error) {
+        // If ScheduledPosts sheet doesn't exist for this page, that's OK
+        if (error.message && error.message.includes('Unable to parse range')) {
+          console.log(`  ⏭️  No ScheduledPosts sheet found for page ${pageId}`);
+        } else {
+          console.error(`  ❌ Error checking posts for page ${pageId}:`, error.message);
         }
       }
     }
     
+    console.log('✅ Finished checking all pages');
+    
   } catch (error) {
-    console.error('❌ Error checking scheduled posts:', error);
+    console.error('❌ Error in scheduled posts checker:', error);
   }
 }
 
