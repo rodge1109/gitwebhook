@@ -622,14 +622,270 @@ function getCurrentTime() {
   return `Current time: ${timeString}`;
 }
 
-async function executeSpecialAction(action) {
+async function executeSpecialAction(action, senderPsid, pageToken) {
   switch(action) {
     case 'time':
       return getCurrentTime();
+    
+    case 'request_location':
+      if (senderPsid && pageToken) {
+        requestLocation(senderPsid, pageToken);
+        return null; // Location request sent via quick reply
+      }
+      return "Please use the Messenger app to share your location.";
+    
     default:
       return null;
   }
 }
+
+// =======================
+// LOCATION UTILITIES
+// =======================
+
+/**
+ * Get address from coordinates using free geocoding API
+ */
+async function getAddressFromCoordinates(lat, long) {
+  return new Promise((resolve) => {
+    const https = require('https');
+    
+    // Using OpenStreetMap's free Nominatim API
+    const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${long}`;
+    
+    https.get(url, {
+      headers: {
+        'User-Agent': 'FacebookMessengerBot/1.0'
+      }
+    }, (res) => {
+      let data = '';
+      
+      res.on('data', (chunk) => {
+        data += chunk;
+      });
+      
+      res.on('end', () => {
+        try {
+          const result = JSON.parse(data);
+          if (result.display_name) {
+            resolve(result.display_name);
+          } else {
+            resolve(null);
+          }
+        } catch (error) {
+          console.error('Error parsing geocoding response:', error);
+          resolve(null);
+        }
+      });
+    }).on('error', (error) => {
+      console.error('Error fetching address:', error);
+      resolve(null);
+    });
+  });
+}
+// =======================
+// GET USER INFO FROM FACEBOOK
+// =======================
+
+/**
+ * Get user's name and profile info from Facebook
+ */
+
+async function getUserInfo(psid, pageToken) {
+  return new Promise((resolve, reject) => {
+    request(
+      {
+        uri: `https://graph.facebook.com/${process.env.GRAPH_API_VERSION}/${psid}`,
+        qs: { 
+          fields: 'first_name,last_name,profile_pic',
+          access_token: pageToken 
+        },
+        method: 'GET'
+      },
+      (err, res, body) => {
+        if (!err && body) {
+          try {
+            const data = JSON.parse(body);
+            console.log(`👤 User info retrieved: ${data.first_name} ${data.last_name}`);
+            resolve({
+              firstName: data.first_name || 'Unknown',
+              lastName: data.last_name || '',
+              fullName: `${data.first_name || 'Unknown'} ${data.last_name || ''}`.trim()
+            });
+          } catch (error) {
+            console.error('Error parsing user info:', error);
+            resolve({ firstName: 'Unknown', lastName: '', fullName: 'Unknown User' });
+          }
+        } else {
+          console.error('Error fetching user info:', err);
+          resolve({ firstName: 'Unknown', lastName: '', fullName: 'Unknown User' });
+        }
+      }
+    );
+  });
+}
+
+// =======================
+// GET HOTLINE NUMBERS
+// =======================
+
+/**
+ * Get hotline numbers from Google Sheets
+ */
+async function getHotlines(sheetId, type = 'emergency') {
+  try {
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId: sheetId,
+      range: 'Hotlines!A:C',
+    });
+    
+    const rows = res.data.values || [];
+    
+    if (rows.length <= 1) {
+      console.log('❌ No hotlines found in sheet');
+      return [];
+    }
+    
+    // Filter by type and return phone numbers
+    const hotlines = [];
+    for (let i = 1; i < rows.length; i++) {
+      const [hotlineType, name, phoneNumber] = rows[i];
+      
+      if (hotlineType && hotlineType.toLowerCase() === type.toLowerCase() && phoneNumber) {
+        hotlines.push({
+          type: hotlineType,
+          name: name || 'Hotline',
+          phoneNumber: phoneNumber
+        });
+      }
+    }
+    
+    console.log(`📞 Found ${hotlines.length} hotline(s) for type: ${type}`);
+    return hotlines;
+    
+  } catch (error) {
+    console.error('Error fetching hotlines:', error);
+    return [];
+  }
+}
+
+// =======================
+// SEND HELP/EMERGENCY ALERT
+// =======================
+
+/**
+ * Send emergency SMS alert with user info and location
+ */
+async function sendHelpAlert(psid, pageToken, keywordsSheetId, location = null) {
+  try {
+    console.log(`🚨 Help request received from ${psid}`);
+    
+    // Get user info from Facebook
+    const userInfo = await getUserInfo(psid, pageToken);
+    
+    // Get hotline numbers
+    const hotlines = await getHotlines(keywordsSheetId, 'emergency');
+    
+    if (hotlines.length === 0) {
+      console.error('❌ No emergency hotlines configured');
+      return {
+        success: false,
+        message: "Emergency hotlines not configured. Please contact support directly."
+      };
+    }
+    
+    // Build SMS message
+    let smsMessage = `🚨 HELP REQUEST ALERT 🚨\n\n`;
+    smsMessage += `From: ${userInfo.fullName}\n`;
+    smsMessage += `Facebook ID: ${psid}\n`;
+    
+    if (location) {
+      smsMessage += `\nLocation:\n`;
+      if (location.address) {
+        smsMessage += `${location.address}\n`;
+      }
+      smsMessage += `Coordinates: ${location.lat}, ${location.long}\n`;
+      smsMessage += `Maps: https://maps.google.com/?q=${location.lat},${location.long}\n`;
+    } else {
+      smsMessage += `\nLocation: Not shared\n`;
+    }
+    
+    smsMessage += `\nTime: ${new Date().toLocaleString('en-PH', { timeZone: 'Asia/Manila' })}`;
+    
+    console.log('📧 SMS Message:\n', smsMessage);
+    
+    // Send SMS to all hotlines
+    let sentCount = 0;
+    const results = [];
+    
+    for (const hotline of hotlines) {
+      console.log(`📱 Sending alert to ${hotline.name}: ${hotline.phoneNumber}`);
+      
+      const smsResult = await sendSMS(hotline.phoneNumber, smsMessage);
+      
+      if (smsResult.success) {
+        sentCount++;
+        results.push(`✅ ${hotline.name}`);
+      } else {
+        results.push(`❌ ${hotline.name} (failed)`);
+      }
+    }
+    
+    if (sentCount > 0) {
+      return {
+        success: true,
+        message: `🚨 Help alert sent to ${sentCount} emergency contact(s)!\n\n${results.join('\n')}\n\nSomeone will assist you shortly.`
+      };
+    } else {
+      return {
+        success: false,
+        message: "Failed to send emergency alerts. Please try contacting support directly."
+      };
+    }
+    
+  } catch (error) {
+    console.error('❌ Error sending help alert:', error);
+    return {
+      success: false,
+      message: "Error sending alert. Please contact support directly."
+    };
+  }
+}
+
+/**
+ * Request location from user with quick reply button
+ */
+function requestLocation(senderPsid, pageToken) {
+  const messageData = {
+    recipient: { id: senderPsid },
+    message: {
+      text: "📍 Please share your location so I can help you better!",
+      quick_replies: [
+        {
+          content_type: "location"
+        }
+      ]
+    }
+  };
+  
+  request(
+    {
+      uri: `https://graph.facebook.com/${process.env.GRAPH_API_VERSION}/me/messages`,
+      qs: { access_token: pageToken },
+      method: 'POST',
+      json: messageData
+    },
+    (err, res, body) => {
+      if (!err) {
+        console.log('📍 Location request sent!');
+      } else {
+        console.error('❌ Unable to send location request:', err);
+      }
+    }
+  );
+}
+
+
 
 // =======================
 // MESSENGER API HELPERS
@@ -1148,7 +1404,47 @@ app.post('/webhook', async (req, res) => {
             continue;
           }
 
-// Handle text messages
+// ==========================================
+// Handle Location Messages
+// ==========================================
+if (messaging.message && messaging.message.attachments) {
+  const attachments = messaging.message.attachments;
+  
+  // Check if user sent a location
+  const locationAttachment = attachments.find(att => att.type === 'location');
+  
+  if (locationAttachment) {
+    const coords = locationAttachment.payload.coordinates;
+    const lat = coords.lat;
+    const long = coords.long;
+    
+    console.log(`📍 Location received from ${senderPsid}: ${lat}, ${long}`);
+    
+    // Get page config
+    const pageConfig = await getPageConfig(pageId);
+    const keywordsSheetId = pageConfig?.keywordsSheetId;
+    
+    // Get address from coordinates using reverse geocoding
+    const address = await getAddressFromCoordinates(lat, long);
+    
+    let reply = `📍 Your location:\n\n`;
+    reply += `Latitude: ${lat}\n`;
+    reply += `Longitude: ${long}\n`;
+    if (address) {
+      reply += `\nAddress: ${address}`;
+    }
+    reply += `\n\nGoogle Maps: https://www.google.com/maps?q=${lat},${long}`;
+    
+    sendTyping(senderPsid, pageToken);
+    setTimeout(() => {
+      callSendAPI(senderPsid, reply, pageToken);
+    }, 1500);
+    
+    continue; // Skip text handler
+  }
+}
+
+          // Handle text messages
 if (messaging.message && messaging.message.text) {
   const receivedText = messaging.message.text.toLowerCase().trim();
   
@@ -1175,6 +1471,36 @@ if (messaging.message && messaging.message.text) {
     console.log('Keywords refreshed');
     continue;
   }
+
+  // ==========================================
+// HANDLE HELP/EMERGENCY REQUEST
+// ==========================================
+if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 'sos') {
+  console.log(`🚨 Emergency help request from ${senderPsid}`);
+  
+  // Check if user recently shared location
+  let location = null;
+  
+  // Request location if not available
+  sendTyping(senderPsid, pageToken);
+  setTimeout(() => {
+    callSendAPI(
+      senderPsid, 
+      "🚨 HELP REQUEST RECEIVED!\n\nFor better assistance, please share your location:",
+      pageToken,
+      [{ content_type: "location" }]
+    );
+  }, 500);
+  
+  // Send alert immediately (without location first)
+  const alertResult = await sendHelpAlert(senderPsid, pageToken, keywordsSheetId, null);
+  
+  setTimeout(() => {
+    callSendAPI(senderPsid, alertResult.message, pageToken);
+  }, 2000);
+  
+  continue;
+}
 
   // Handle booking session
   if (bookingSessions[senderPsid]) {
