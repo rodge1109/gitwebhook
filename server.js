@@ -862,13 +862,20 @@ async function postMultipleImagesToFacebook(pageId, pageToken, imageUrls, messag
 // =======================
 // SCHEDULED POSTS CHECKER
 // =======================
-
 async function checkScheduledPosts() {
   try {
     console.log('🔍 Checking for scheduled posts...');
     
+    // Get the keywords sheet ID from page config
+    const pageConfig = await getPageConfig(process.env.PAGE_ID);
+    
+    if (!pageConfig || !pageConfig.keywordsSheetId) {
+      console.error('❌ No keywords sheet ID found in config');
+      return;
+    }
+    
     const res = await sheets.spreadsheets.values.get({
-      spreadsheetId: process.env.SHEET_ID,
+      spreadsheetId: pageConfig.keywordsSheetId,  // ← Use keywords sheet ID
       range: 'ScheduledPosts!A:E',
     });
     
@@ -880,7 +887,6 @@ async function checkScheduledPosts() {
     }
     
     const now = new Date();
-    const header = rows[0];
     
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i];
@@ -907,8 +913,6 @@ async function checkScheduledPosts() {
         console.log(`📅 Time to post: "${message}"`);
         
         try {
-          const pageConfig = await getPageConfig(process.env.PAGE_ID);
-          
           if (!pageConfig) {
             console.error('❌ Page config not found');
             continue;
@@ -952,7 +956,7 @@ async function checkScheduledPosts() {
           
           // Mark as posted in sheet
           await sheets.spreadsheets.values.update({
-            spreadsheetId: process.env.SHEET_ID,
+            spreadsheetId: pageConfig.keywordsSheetId,  // ← Use keywords sheet ID
             range: `ScheduledPosts!E${i + 1}`,
             valueInputOption: 'RAW',
             resource: {
