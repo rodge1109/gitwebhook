@@ -9,6 +9,9 @@ const request = require('request');
 const app = express();
 app.use(bodyParser.json());
 
+const pendingHelpRequests = new Set();
+
+
 /* =======================
    GOOGLE SHEETS SETUP
 ======================= */
@@ -639,21 +642,26 @@ function getCurrentTime() {
 }
 
 async function executeSpecialAction(action, senderPsid, pageToken) {
-  switch(action) {
+  switch (action) {
     case 'time':
       return getCurrentTime();
-    
+
     case 'request_location':
-      if (senderPsid && pageToken) {
-        requestLocation(senderPsid, pageToken);
-        return null; // Location request sent via quick reply
+      if (!senderPsid || !pageToken) {
+        return "Please use the Messenger app to share your location.";
       }
-      return "Please use the Messenger app to share your location.";
-    
+
+      // ✅ Await the location request
+      await requestLocation(senderPsid, pageToken);
+
+      // Explicitly indicate that location request was sent
+      return { handled: true };
+
     default:
       return null;
   }
 }
+
 
 // =======================
 // LOCATION UTILITIES
