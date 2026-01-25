@@ -815,18 +815,18 @@ async function sendHelpAlert(psid, pageToken, keywordsSheetId, location = null) 
     smsMessage += `From: ${userInfo.fullName}\n`;
     smsMessage += `Facebook ID: ${psid}\n`;
     
-    if (location) {
-      smsMessage += `\nLocation:\n`;
-      if (location.address) {
-        smsMessage += `${location.address}\n`;
-      }
-      smsMessage += `Coordinates: ${location.lat}, ${location.long}\n`;
-      smsMessage += `Maps: https://maps.google.com/?q=${location.lat},${location.long}\n`;
-    } else {
-      smsMessage += `\nLocation: Not shared\n`;
-    }
+   // if (location) {
+   //   smsMessage += `\nLocation:\n`;
+   //   if (location.address) {
+   //     smsMessage += `${location.address}\n`;
+   //   }
+   //   smsMessage += `Coordinates: ${location.lat}, ${location.long}\n`;
+   //   smsMessage += `Maps: https://maps.google.com/?q=${location.lat},${location.long}\n`;
+   // } else {
+   //   smsMessage += `\nLocation: Not shared\n`;
+   // }
     
-    smsMessage += `\nTime: ${new Date().toLocaleString('en-PH', { timeZone: 'Asia/Manila' })}`;
+   //smsMessage += `\nTime: ${new Date().toLocaleString('en-PH', { timeZone: 'Asia/Manila' })}`;
     
     console.log('📧 SMS Message:\n', smsMessage);
     
