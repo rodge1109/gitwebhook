@@ -886,7 +886,9 @@ function requestLocation(senderPsid, pageToken) {
       text: "📍 Please share your location so I can help you better!",
       quick_replies: [
         {
-          content_type: "location"
+          content_type: "text",          // Use text instead of location
+          title: "Share my location",    // What the user sees on the button
+          payload: "USER_WILL_SEND_LOCATION" // Your bot will receive this payload
         }
       ]
     }
@@ -908,7 +910,6 @@ function requestLocation(senderPsid, pageToken) {
     }
   );
 }
-
 
 
 // =======================
