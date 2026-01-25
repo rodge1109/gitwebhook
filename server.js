@@ -816,6 +816,31 @@ async function sendHelpAlert(psid, pageToken, keywordsSheetId, location = null) 
       };
     }
     
+// =======================
+// REMINDER FOR PENDING HELP REQUESTS
+// =======================
+
+// Check for pending help requests every 30 seconds
+setInterval(() => {
+  pendingHelpRequests.forEach(async (psid) => {
+    const timePending = Date.now() - (userLocations[psid]?.timestamp || 0);
+    
+    // If pending for more than 2 minutes, send reminder
+    if (timePending > 2 * 60 * 1000) {
+      console.log(`⏰ Reminding ${psid} to share location...`);
+      
+      try {
+        // Get page token (you'll need to store this or fetch it)
+        // For now, we'll skip auto-reminder
+        // You can enhance this if needed
+      } catch (error) {
+        console.error('Error sending reminder:', error);
+      }
+    }
+  });
+}, 30 * 1000);
+
+
     // Build SMS message
     let smsMessage = ` HELP REQUEST ALERT \n\n`;
     smsMessage += `From: ${userInfo.fullName}\n`;
@@ -1501,26 +1526,45 @@ if (messaging.message && messaging.message.text) {
 if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 'sos') {
   console.log(`🚨 Emergency help request from ${senderPsid}`);
   
-  // Check if user recently shared location
-  let location = null;
+  // Check if user has cached location
+  const location = userLocations[senderPsid];
   
-  // Request location if not available
-  sendTyping(senderPsid, pageToken);
-  setTimeout(() => {
-    callSendAPI(
-      senderPsid, 
-      "🚨 HELP REQUEST RECEIVED!\n\nFor better assistance, please share your location:",
-      pageToken,
-      [{ content_type: "location" }]
-    );
-  }, 500);
-  
-  // Send alert immediately (without location first)
-  const alertResult = await sendHelpAlert(senderPsid, pageToken, keywordsSheetId, null);
-  
-  setTimeout(() => {
-    callSendAPI(senderPsid, alertResult.message, pageToken);
-  }, 2000);
+  if (location) {
+    // User has location, send alert immediately
+    console.log(`✅ Using cached location for ${senderPsid}`);
+    
+    const alertResult = await sendHelpAlert(senderPsid, pageToken, keywordsSheetId, location);
+    
+    sendTyping(senderPsid, pageToken);
+    setTimeout(() => {
+      callSendAPI(senderPsid, alertResult.message, pageToken);
+    }, 1500);
+  } else {
+    // NO LOCATION - Request it (MANDATORY)
+    console.log(`⚠️ No location for ${senderPsid}, requesting now...`);
+    
+    // Mark as pending help request
+    pendingHelpRequests.add(senderPsid);
+    
+    sendTyping(senderPsid, pageToken);
+    setTimeout(() => {
+      callSendAPI(
+        senderPsid, 
+        "🚨 EMERGENCY HELP REQUEST\n\n⚠️ To send help, we need your location.\n\nPlease click the button below to share your current location:",
+        pageToken,
+        [{ content_type: "location" }]
+      );
+    }, 1000);
+    
+    // Send follow-up instruction
+    setTimeout(() => {
+      callSendAPI(
+        senderPsid,
+        "📍 How to share location:\n\n1. Click the 📍 button above\n2. Allow location access\n3. Confirm your location\n\nHelp will be sent immediately after!",
+        pageToken
+      );
+    }, 2500);
+  }
   
   continue;
 }
