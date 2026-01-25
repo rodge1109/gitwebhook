@@ -643,24 +643,22 @@ function getCurrentTime() {
 
 async function executeSpecialAction(action, senderPsid, pageToken) {
   switch (action) {
-    case 'time':
-      return getCurrentTime();
-
     case 'request_location':
       if (!senderPsid || !pageToken) {
         return "Please use the Messenger app to share your location.";
       }
 
-      // ✅ Await the location request
+      pendingHelpRequests.add(senderPsid); // ✅ mark as waiting
       await requestLocation(senderPsid, pageToken);
 
-      // Explicitly indicate that location request was sent
-      return { handled: true };
+      // Return message to indicate bot is waiting
+      return { handled: true, text: "📍 Please share your location so we can send help!" };
 
     default:
       return null;
   }
 }
+
 
 
 // =======================
@@ -886,7 +884,7 @@ function requestLocation(senderPsid, pageToken) {
       text: "📍 Please share your location so I can help you better!",
       quick_replies: [
         {
-          content_type: "text",          // Use text instead of location
+          content_type: "location",          // Use text instead of location
           title: "Share my location",    // What the user sees on the button
           payload: "USER_WILL_SEND_LOCATION" // Your bot will receive this payload
         }
@@ -1343,6 +1341,31 @@ app.get('/webhook', (req, res) => {
   }
 });
 
+async function handleIncomingMessage(senderPsid, message) {
+  // Check if user is in pending help
+  if (pendingHelpRequests.has(senderPsid) && message.attachments) {
+    const locationAttachment = message.attachments.find(att => att.type === 'location');
+
+    if (locationAttachment) {
+      const { lat, long } = locationAttachment.payload.coordinates;
+      pendingHelpRequests.delete(senderPsid);
+
+      console.log(`📍 Location received from ${senderPsid}: ${lat}, ${long}`);
+
+      // Send help alert with location
+      const pageConfig = await getPageConfig(process.env.PAGE_ID); // use your PAGE_ID or dynamic
+      const alertResult = await sendHelpAlert(senderPsid, pageConfig.pageToken, pageConfig.keywordsSheetId, {
+        lat,
+        long
+      });
+
+      return alertResult.message;
+    }
+  }
+  return null; // no location to handle
+}
+
+
 
 // =======================
 // Webhook handler
@@ -1350,84 +1373,123 @@ app.get('/webhook', (req, res) => {
 app.post('/webhook', async (req, res) => {
   const body = req.body;
 
-  // Initialize the processedComments set
-  const processedComments = new Set();
-
-  // Check for valid object type
+  // Check for valid page object
   if (body.object === 'page') {
     for (const entry of body.entry) {
       const pageId = entry.id;
       const pageToken = await getPageToken(pageId);
 
-      // Handle Messenger messages and postbacks
-      if (entry.messaging) {
-        for (const messaging of entry.messaging) {
-          const senderPsid = messaging.sender.id;
+      // Iterate through messaging events
+      for (const messaging of entry.messaging) {
+        const senderPsid = messaging.sender.id;
 
-          if (messaging.postback) {
-            const payload = messaging.postback.payload;
-            console.log(`Postback received: ${payload}`);
+        // =======================
+        // 1️⃣ Handle location messages for pending help
+        // =======================
+        if (messaging.message && messaging.message.attachments) {
+          const locationAttachment = messaging.message.attachments.find(att => att.type === 'location');
+          if (locationAttachment && pendingHelpRequests.has(senderPsid)) {
+            const { lat, long } = locationAttachment.payload.coordinates;
 
-            if (payload === 'BOOKING_YES') {
-              // Booking flow for YES
-              if (bookingSessions[senderPsid] && bookingSessions[senderPsid].step === 0) {
-                const nextQuestion = askQuestion(senderPsid, 1);
-                bookingSessions[senderPsid].step = 1;
+            // Remove from pending help
+            pendingHelpRequests.delete(senderPsid);
 
-                sendTyping(senderPsid, pageToken);
-                setTimeout(() => {
-                  if (nextQuestion.template) {
-                    callSendAPI(senderPsid, null, pageToken, null, nextQuestion.template);
-                  } else if (nextQuestion.quickReplies) {
-                    callSendAPI(senderPsid, nextQuestion.text, pageToken, nextQuestion.quickReplies);
-                  } else {
-                    callSendAPI(senderPsid, nextQuestion.text, pageToken);
-                  }
-                }, 1000);
-              }
-            } else if (payload === 'BOOKING_NO') {
-              // Booking flow for NO
-              delete bookingSessions[senderPsid];
-              sendTyping(senderPsid, pageToken);
-              setTimeout(() => {
-                callSendAPI(senderPsid, "Booking cancelled. No problem! Feel free to book anytime.", pageToken);
-              }, 1000);
-            } else if (payload.startsWith('BOOKING_ANSWER_')) {
-              // Handle booking answers
-              const answer = payload.replace('BOOKING_ANSWER_', '').replace(/_/g, ' ');
+            console.log(`📍 Location received from ${senderPsid}: ${lat}, ${long}`);
 
-              if (answer === 'Other date' || payload === 'BOOKING_ANSWER_CUSTOM_DATE') {
-                bookingSessions[senderPsid].waitingForCustomDate = true;
-                sendTyping(senderPsid, pageToken);
-                setTimeout(() => {
-                  callSendAPI(senderPsid, "Please type your preferred date (e.g., December 15, 2025):", pageToken);
-                }, 1000);
-                continue;
-              }
+            // Send help alert
+            const pageConfig = await getPageConfig(YOUR_PAGE_ID);
+            const alertResult = await sendHelpAlert(senderPsid, pageConfig.pageToken, pageConfig.keywordsSheetId, {
+              lat,
+              long,
+            });
 
-              if (bookingSessions[senderPsid]) {
-                const currentStep = bookingSessions[senderPsid].step;
-                const stepConfig = bookingSessions[senderPsid].config[currentStep - 1];
-                if (stepConfig) {
-                  bookingSessions[senderPsid].data[stepConfig[0]] = answer;
-                }
+            // Send confirmation to user
+            callSendAPI(senderPsid, alertResult.message, pageToken);
 
-                const nextQuestion = processBookingStep(senderPsid, answer);
-
-                sendTyping(senderPsid, pageToken);
-                setTimeout(() => {
-                  if (nextQuestion.template) {
-                    callSendAPI(senderPsid, null, pageToken, null, nextQuestion.template);
-                  } else if (nextQuestion.quickReplies) {
-                    callSendAPI(senderPsid, nextQuestion.text, pageToken, nextQuestion.quickReplies);
-                  } else {
-                    callSendAPI(senderPsid, nextQuestion.text, pageToken);
-                  }
-                }, 1000);
-              }
-            }
+            // Skip further processing for this message
             continue;
           }
+        }
+
+        // =======================
+        // 2️⃣ Handle postbacks
+        // =======================
+        if (messaging.postback) {
+          const payload = messaging.postback.payload;
+          console.log(`Postback received: ${payload}`);
+
+          if (payload === 'BOOKING_YES') {
+            if (bookingSessions[senderPsid] && bookingSessions[senderPsid].step === 0) {
+              const nextQuestion = askQuestion(senderPsid, 1);
+              bookingSessions[senderPsid].step = 1;
+
+              sendTyping(senderPsid, pageToken);
+              setTimeout(() => {
+                if (nextQuestion.template) {
+                  callSendAPI(senderPsid, null, pageToken, null, nextQuestion.template);
+                } else if (nextQuestion.quickReplies) {
+                  callSendAPI(senderPsid, nextQuestion.text, pageToken, nextQuestion.quickReplies);
+                } else {
+                  callSendAPI(senderPsid, nextQuestion.text, pageToken);
+                }
+              }, 1000);
+            }
+          } else if (payload === 'BOOKING_NO') {
+            delete bookingSessions[senderPsid];
+            sendTyping(senderPsid, pageToken);
+            setTimeout(() => {
+              callSendAPI(senderPsid, "Booking cancelled. No problem! Feel free to book anytime.", pageToken);
+            }, 1000);
+          } else if (payload.startsWith('BOOKING_ANSWER_')) {
+            const answer = payload.replace('BOOKING_ANSWER_', '').replace(/_/g, ' ');
+
+            if (answer === 'Other date' || payload === 'BOOKING_ANSWER_CUSTOM_DATE') {
+              bookingSessions[senderPsid].waitingForCustomDate = true;
+              sendTyping(senderPsid, pageToken);
+              setTimeout(() => {
+                callSendAPI(senderPsid, "Please type your preferred date (e.g., December 15, 2025):", pageToken);
+              }, 1000);
+              continue;
+            }
+
+            if (bookingSessions[senderPsid]) {
+              const currentStep = bookingSessions[senderPsid].step;
+              const stepConfig = bookingSessions[senderPsid].config[currentStep - 1];
+              if (stepConfig) {
+                bookingSessions[senderPsid].data[stepConfig[0]] = answer;
+              }
+
+              const nextQuestion = processBookingStep(senderPsid, answer);
+
+              sendTyping(senderPsid, pageToken);
+              setTimeout(() => {
+                if (nextQuestion.template) {
+                  callSendAPI(senderPsid, null, pageToken, null, nextQuestion.template);
+                } else if (nextQuestion.quickReplies) {
+                  callSendAPI(senderPsid, nextQuestion.text, pageToken, nextQuestion.quickReplies);
+                } else {
+                  callSendAPI(senderPsid, nextQuestion.text, pageToken);
+                }
+              }, 1000);
+            }
+          }
+          continue;
+        }
+
+        // =======================
+        // 3️⃣ Handle text messages
+        // =======================
+        if (messaging.message && messaging.message.text) {
+          const response = await processBooking(senderPsid, messaging.message.text);
+          callSendAPI(senderPsid, response.text, pageToken);
+        }
+      }
+    }
+  }
+
+  // Return a 200 to Facebook
+  res.status(200).send('EVENT_RECEIVED');
+});
 
 // ==========================================
 // Handle Location Messages
