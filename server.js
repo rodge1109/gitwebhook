@@ -218,6 +218,23 @@ function formatBookingSMS(bookingData, config) {
 
 const bookingSessions = {};
 
+// =======================
+// USER LOCATION CACHE
+// =======================
+
+const userLocations = {};
+
+// Clean up old locations every hour
+setInterval(() => {
+  const oneHourAgo = Date.now() - (60 * 60 * 1000);
+  Object.keys(userLocations).forEach(psid => {
+    if (userLocations[psid].timestamp < oneHourAgo) {
+      delete userLocations[psid];
+      console.log(`🧹 Cleaned up location cache for ${psid}`);
+    }
+  });
+}, 60 * 60 * 1000);
+
 // ✅ CLEANUP STALE BOOKING SESSIONS
 const BOOKING_TIMEOUT = 30 * 60 * 1000; // 30 minutes
 
@@ -1461,35 +1478,66 @@ if (messaging.message && messaging.message.attachments) {
   // Check if user sent a location
   const locationAttachment = attachments.find(att => att.type === 'location');
   
-  if (locationAttachment) {
-    const coords = locationAttachment.payload.coordinates;
-    const lat = coords.lat;
-    const long = coords.long;
+if (locationAttachment) {
+  const coords = locationAttachment.payload.coordinates;
+  const lat = coords.lat;
+  const long = coords.long;
+  
+  console.log(`📍 Location received from ${senderPsid}: ${lat}, ${long}`);
+  
+  // Get page config
+  const pageConfig = await getPageConfig(pageId);
+  const keywordsSheetId = pageConfig?.keywordsSheetId;
+  
+  // Get address from coordinates using reverse geocoding
+  const address = await getAddressFromCoordinates(lat, long);
+  
+  // Store location in cache
+  userLocations[senderPsid] = {
+    lat: lat,
+    long: long,
+    address: address,
+    timestamp: Date.now()
+  };
+  
+  console.log(`💾 Location stored for ${senderPsid}`);
+  
+  // Check if this was in response to a help request
+  if (pendingHelpRequests.has(senderPsid)) {
+    console.log(`🚨 Processing pending help request with location for ${senderPsid}`);
     
-    console.log(`📍 Location received from ${senderPsid}: ${lat}, ${long}`);
+    // Remove from pending
+    pendingHelpRequests.delete(senderPsid);
     
-    // Get page config
-    const pageConfig = await getPageConfig(pageId);
-    const keywordsSheetId = pageConfig?.keywordsSheetId;
+    // Send help alert WITH location
+    const alertResult = await sendHelpAlert(
+      senderPsid, 
+      pageToken, 
+      keywordsSheetId, 
+      { lat, long, address }
+    );
     
-    // Get address from coordinates using reverse geocoding
-    const address = await getAddressFromCoordinates(lat, long);
-    
-    let reply = `📍 Your location:\n\n`;
-    reply += `Latitude: ${lat}\n`;
-    reply += `Longitude: ${long}\n`;
+    sendTyping(senderPsid, pageToken);
+    setTimeout(() => {
+      callSendAPI(senderPsid, alertResult.message, pageToken);
+    }, 1500);
+  } else {
+    // Normal location share (not help request)
+    let reply = `📍 Location saved!\n\n`;
     if (address) {
-      reply += `\nAddress: ${address}`;
+      reply += `Address: ${address}\n\n`;
     }
-    reply += `\n\nGoogle Maps: https://www.google.com/maps?q=${lat},${long}`;
+    reply += `Coordinates: ${lat}, ${long}\n`;
+    reply += `Google Maps: https://www.google.com/maps?q=${lat},${long}`;
     
     sendTyping(senderPsid, pageToken);
     setTimeout(() => {
       callSendAPI(senderPsid, reply, pageToken);
     }, 1500);
-    
-    continue; // Skip text handler
   }
+  
+  continue; // Skip text handler
+}
 }
 
           // Handle text messages
