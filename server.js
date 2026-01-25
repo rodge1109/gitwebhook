@@ -1568,17 +1568,16 @@ if (messaging.message && messaging.message.text) {
     continue;
   }
 
-  // ==========================================
+ 
+// ==========================================
 // HANDLE HELP/EMERGENCY REQUEST
 // ==========================================
 if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 'sos') {
   console.log(`🚨 Emergency help request from ${senderPsid}`);
   
-  // Check if user has cached location
   const location = userLocations[senderPsid];
   
   if (location) {
-    // User has location, send alert immediately
     console.log(`✅ Using cached location for ${senderPsid}`);
     
     const alertResult = await sendHelpAlert(senderPsid, pageToken, keywordsSheetId, location);
@@ -1588,30 +1587,18 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
       callSendAPI(senderPsid, alertResult.message, pageToken);
     }, 1500);
   } else {
-    // NO LOCATION - Request it (MANDATORY)
     console.log(`⚠️ No location for ${senderPsid}, requesting now...`);
     
-    // Mark as pending help request
     pendingHelpRequests.add(senderPsid);
     
     sendTyping(senderPsid, pageToken);
     setTimeout(() => {
       callSendAPI(
         senderPsid, 
-        "🚨 EMERGENCY HELP REQUEST\n\n⚠️ To send help, we need your location.\n\nPlease click the button below to share your current location:",
-        pageToken,
-        [{ content_type: "location" }]
-      );
-    }, 1000);
-    
-    // Send follow-up instruction
-    setTimeout(() => {
-      callSendAPI(
-        senderPsid,
-        "📍 How to share location:\n\n1. Click the 📍 button above\n2. Allow location access\n3. Confirm your location\n\nHelp will be sent immediately after!",
+        "🚨 EMERGENCY HELP REQUEST\n\n⚠️ Location is REQUIRED to send help.\n\n📍 TO SHARE YOUR LOCATION:\n\n1️⃣ Tap the [+] button below\n2️⃣ Select 'Location' 📍\n3️⃣ Tap 'Send Location'\n4️⃣ Confirm your location\n\n⏳ Once shared, help will be sent immediately!",
         pageToken
       );
-    }, 2500);
+    }, 1000);
   }
   
   continue;
