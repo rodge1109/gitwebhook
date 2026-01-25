@@ -77,6 +77,13 @@ async function sendSMS(phoneNumber, message) {
     const https = require('https');
     const querystring = require('querystring');
     
+    console.log('📤 Attempting to send SMS:');
+    console.log('   To:', phoneNumber);
+    console.log('   API Key:', process.env.SEMAPHORE_API_KEY ? 'Set (' + process.env.SEMAPHORE_API_KEY.substring(0, 10) + '...)' : '❌ NOT SET!');
+    console.log('   Sender:', process.env.SEMAPHORE_SENDER_NAME || 'KIARA');
+    console.log('   Message length:', message.length, 'characters');
+    console.log('   Message preview:', message.substring(0, 100) + '...');
+    
     const postData = querystring.stringify({
       apikey: process.env.SEMAPHORE_API_KEY,
       number: phoneNumber,
@@ -99,29 +106,38 @@ async function sendSMS(phoneNumber, message) {
       const req = https.request(options, (res) => {
         let data = '';
         
+        console.log('📥 Semaphore API Response:');
+        console.log('   Status Code:', res.statusCode);
+        
         res.on('data', (chunk) => {
           data += chunk;
         });
         
         res.on('end', () => {
+          console.log('   Response Body:', data);
+          
           try {
             const response = JSON.parse(data);
+            
             if (response.message_id || response[0]?.message_id) {
-              console.log('✅ SMS sent successfully:', phoneNumber);
+              console.log('✅ SMS sent successfully to:', phoneNumber);
+              console.log('   Message ID:', response.message_id || response[0]?.message_id);
               resolve({ success: true, data: response });
             } else {
-              console.error('❌ SMS failed:', response);
+              console.error('❌ SMS failed!');
+              console.error('   Error:', JSON.stringify(response, null, 2));
               resolve({ success: false, data: response });
             }
           } catch (err) {
             console.error('❌ SMS parse error:', err);
-            resolve({ success: false, error: err });
+            console.error('   Raw response:', data);
+            resolve({ success: false, error: err, rawResponse: data });
           }
         });
       });
       
       req.on('error', (err) => {
-        console.error('❌ SMS request error:', err);
+        console.error('❌ SMS request error:', err.message);
         resolve({ success: false, error: err });
       });
       
@@ -129,7 +145,7 @@ async function sendSMS(phoneNumber, message) {
       req.end();
     });
   } catch (err) {
-    console.error('❌ Error sending SMS:', err);
+    console.error('❌ Error in sendSMS function:', err);
     return { success: false, error: err };
   }
 }
