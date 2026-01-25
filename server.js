@@ -794,7 +794,7 @@ async function getHotlines(sheetId, type = 'emergency') {
  */
 async function sendHelpAlert(psid, pageToken, keywordsSheetId, location = null) {
   try {
-    console.log(`🚨 Help request received from ${psid}`);
+    console.log(` Help request received from ${psid}`);
     
     // Get user info from Facebook
     const userInfo = await getUserInfo(psid, pageToken);
@@ -811,46 +811,46 @@ async function sendHelpAlert(psid, pageToken, keywordsSheetId, location = null) 
     }
     
     // Build SMS message
-    let smsMessage = `🚨 HELP REQUEST ALERT 🚨\n\n`;
+    let smsMessage = ` HELP REQUEST ALERT \n\n`;
     smsMessage += `From: ${userInfo.fullName}\n`;
     smsMessage += `Facebook ID: ${psid}\n`;
     
-   // if (location) {
-   //   smsMessage += `\nLocation:\n`;
-   //   if (location.address) {
-   //     smsMessage += `${location.address}\n`;
-   //   }
-   //   smsMessage += `Coordinates: ${location.lat}, ${location.long}\n`;
-   //   smsMessage += `Maps: https://maps.google.com/?q=${location.lat},${location.long}\n`;
-   // } else {
-   //   smsMessage += `\nLocation: Not shared\n`;
-   // }
+    if (location) {
+      smsMessage += `\nLocation:\n`;
+      if (location.address) {
+       smsMessage += `${location.address}\n`;
+      }
+      smsMessage += `Coordinates: ${location.lat}, ${location.long}\n`;
+      smsMessage += `Maps: https://maps.google.com/?q=${location.lat},${location.long}\n`;
+      } else {
+      smsMessage += `\nLocation: Not shared\n`;
+     }
     
-   //smsMessage += `\nTime: ${new Date().toLocaleString('en-PH', { timeZone: 'Asia/Manila' })}`;
+     smsMessage += `\nTime: ${new Date().toLocaleString('en-PH', { timeZone: 'Asia/Manila' })}`;
     
-    console.log('📧 SMS Message:\n', smsMessage);
+    console.log('SMS Message:\n', smsMessage);
     
     // Send SMS to all hotlines
     let sentCount = 0;
     const results = [];
     
     for (const hotline of hotlines) {
-      console.log(`📱 Sending alert to ${hotline.name}: ${hotline.phoneNumber}`);
+      console.log(`Sending alert to ${hotline.name}: ${hotline.phoneNumber}`);
       
       const smsResult = await sendSMS(hotline.phoneNumber, smsMessage);
       
       if (smsResult.success) {
         sentCount++;
-        results.push(`✅ ${hotline.name}`);
+        results.push(` ${hotline.name}`);
       } else {
-        results.push(`❌ ${hotline.name} (failed)`);
+        results.push(` ${hotline.name} (failed)`);
       }
     }
     
     if (sentCount > 0) {
       return {
         success: true,
-        message: `🚨 Help alert sent to ${sentCount} emergency contact(s)!\n\n${results.join('\n')}\n\nSomeone will assist you shortly.`
+        message: ` Help alert sent to ${sentCount} emergency contact(s)!\n\n${results.join('\n')}\n\nSomeone will assist you shortly.`
       };
     } else {
       return {
