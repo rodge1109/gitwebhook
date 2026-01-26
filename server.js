@@ -649,6 +649,34 @@ async function logPSID(psid) {
   }
 }
 
+async function logHelpRequest(psid, userInfo, location, bookingSheetId) {
+  try {
+    const timestamp = new Date().toLocaleString('en-PH', { timeZone: 'Asia/Manila' });
+    const values = [
+      psid,
+      userInfo?.fullName || 'Unknown',
+      location?.address || 'Not provided',
+      location?.lat || '',
+      location?.long || '',
+      location ? `https://maps.google.com/?q=${location.lat},${location.long}` : '',
+      timestamp
+    ];
+
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: bookingSheetId,
+      range: 'HelpRequests!A:G',
+      valueInputOption: 'RAW',
+      insertDataOption: 'INSERT_ROWS',
+      resource: {
+        values: [values],
+      },
+    });
+    console.log(`✅ Help request logged for ${psid} with location: ${location?.address || 'N/A'}`);
+  } catch (err) {
+    console.error('Error logging help request:', err);
+  }
+}
+
 function getCurrentTime() {
   const now = new Date();
   const timeString = now.toLocaleString('en-PH', { 
@@ -816,7 +844,7 @@ async function getHotlines(sheetId, type = 'emergency') {
 /**
  * Send emergency SMS alert with user info and location
  */
-async function sendHelpAlert(psid, pageToken, keywordsSheetId, location = null) {
+async function sendHelpAlert(psid, pageToken, keywordsSheetId, location = null, bookingSheetId = null) {
   try {
     console.log(` Help request received from ${psid}`);
     
@@ -869,6 +897,11 @@ async function sendHelpAlert(psid, pageToken, keywordsSheetId, location = null) 
       } else {
         results.push(` ${hotline.name} (failed)`);
       }
+    }
+    
+    // Log help request to sheet if bookingSheetId is provided
+    if (bookingSheetId) {
+      await logHelpRequest(psid, userInfo, location, bookingSheetId);
     }
     
     if (sentCount > 0) {
@@ -1514,6 +1547,7 @@ if (locationAttachment) {
   // Get page config
   const pageConfig = await getPageConfig(pageId);
   const keywordsSheetId = pageConfig?.keywordsSheetId;
+  const bookingSheetId = pageConfig?.bookingSheetId;
   
   // Get address from coordinates using reverse geocoding
   const address = await getAddressFromCoordinates(lat, long);
@@ -1540,7 +1574,8 @@ if (locationAttachment) {
       senderPsid, 
       pageToken, 
       keywordsSheetId, 
-      { lat, long, address }
+      { lat, long, address },
+      bookingSheetId
     );
     
     sendTyping(senderPsid, pageToken);
@@ -1610,7 +1645,7 @@ if (messaging.message && messaging.message.text) {
     };
     
     // Send help alert with manual location
-    const alertResult = await sendHelpAlert(senderPsid, pageToken, keywordsSheetId, { address: userLocation });
+    const alertResult = await sendHelpAlert(senderPsid, pageToken, keywordsSheetId, { address: userLocation }, bookingSheetId);
     
     // Clear the location wait session
     delete bookingSessions[senderPsid];
@@ -1644,7 +1679,7 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
     // User has location, send alert immediately
     console.log(`✅ Using cached location for ${senderPsid}`);
     
-    const alertResult = await sendHelpAlert(senderPsid, pageToken, keywordsSheetId, location);
+    const alertResult = await sendHelpAlert(senderPsid, pageToken, keywordsSheetId, location, bookingSheetId);
     
     sendTyping(senderPsid, pageToken);
     setTimeout(() => {
