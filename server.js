@@ -1450,6 +1450,17 @@ app.post('/webhook', async (req, res) => {
                   }
                 }, 1000);
               }
+            } else if (payload === 'HELP_SHARE_LOCATION') {
+              // Handle help location request
+              console.log(`📍 User clicked location button for help request`);
+              
+              sendTyping(senderPsid, pageToken);
+              setTimeout(() => {
+                callSendAPI(senderPsid, 
+                  "📍 To share your location:\n\n1. Tap the attachment button (📎) in Messenger\n2. Select 'Location'\n3. Share your current location\n\nOnce you share it, we'll immediately send help!",
+                  pageToken
+                );
+              }, 1000);
             }
             continue;
           }
