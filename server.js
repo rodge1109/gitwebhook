@@ -1584,6 +1584,16 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
   if (bookingSessions[senderPsid]) {
     console.log(`Processing booking step: ${bookingSessions[senderPsid].step}`);
 
+    // Check if user wants to cancel
+    if (receivedText === 'cancel' || receivedText === 'stop' || receivedText === 'exit') {
+      delete bookingSessions[senderPsid];
+      sendTyping(senderPsid, pageToken);
+      setTimeout(() => {
+        callSendAPI(senderPsid, "Booking cancelled. No problem! Feel free to book anytime.", pageToken);
+      }, 1000);
+      continue;
+    }
+
     // Check if waiting for a custom date
     if (bookingSessions[senderPsid].waitingForCustomDate) {
       const customDate = messaging.message.text;
