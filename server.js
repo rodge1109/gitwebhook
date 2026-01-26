@@ -917,20 +917,25 @@ setInterval(() => {
 }
 
 /**
- * Request location from user with quick reply button
+ * Request location from user with location template
  */
 function requestLocation(senderPsid, pageToken) {
   const messageData = {
     recipient: { id: senderPsid },
     message: {
-      text: "📍 Please share your location so I can help you better!",
-      quick_replies: [
-        {
-          content_type: "location",          // Use text instead of location
-          title: "Share my location",    // What the user sees on the button
-          payload: "USER_WILL_SEND_LOCATION" // Your bot will receive this payload
+      attachment: {
+        type: "template",
+        payload: {
+          template_type: "button",
+          text: "📍 Please share your location so I can help you better!",
+          buttons: [
+            {
+              type: "location",
+              title: "Share my location"
+            }
+          ]
         }
-      ]
+      }
     }
   };
   
