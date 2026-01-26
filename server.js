@@ -1569,7 +1569,7 @@ if (messaging.message && messaging.message.text) {
   }
 
  
-// ==========================================
+ // ==========================================
 // HANDLE HELP/EMERGENCY REQUEST
 // ==========================================
 if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 'sos') {
@@ -1592,13 +1592,24 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
     pendingHelpRequests.add(senderPsid);
     
     sendTyping(senderPsid, pageToken);
+    
+    // Main instruction message
     setTimeout(() => {
       callSendAPI(
         senderPsid, 
-        "🚨 EMERGENCY HELP REQUEST\n\n⚠️ Location is REQUIRED to send help.\n\n📍 TO SHARE YOUR LOCATION:\n\n1️⃣ Tap the [+] button below\n2️⃣ Select 'Location' 📍\n3️⃣ Tap 'Send Location'\n4️⃣ Confirm your location\n\n⏳ Once shared, help will be sent immediately!",
+        "🚨 EMERGENCY ALERT INITIATED\n\n⚠️ LOCATION REQUIRED\n\nTo send emergency help, we need your current location.\n\n📍 HOW TO SHARE:\n\n📱 MOBILE:\nTap the camera (📷) or dots (⋯) button next to the message box → Select 'Location'\n\n💻 DESKTOP:\nClick the plus (+) button next to the message box → Select 'Location'\n\nThen tap 'Send Current Location' or 'Share Live Location'\n\n⏳ Standing by for your location...",
         pageToken
       );
     }, 1000);
+    
+    // Helpful tip after 5 seconds
+    setTimeout(() => {
+      callSendAPI(
+        senderPsid,
+        "💡 TIP: The location button is at the BOTTOM of this chat, not in your phone's settings!",
+        pageToken
+      );
+    }, 6000);
   }
   
   continue;
