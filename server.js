@@ -902,8 +902,7 @@ function requestLocation(senderPsid, pageToken) {
       text: "📍 Please share your location so I can help you better!",
       quick_replies: [
         {
-          content_type: "location",
-          title: "Share Location"
+          content_type: "location"
         }
       ]
     }
