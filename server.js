@@ -1471,10 +1471,16 @@ app.post('/webhook', async (req, res) => {
 if (messaging.message && messaging.message.attachments) {
   const attachments = messaging.message.attachments;
   
+  console.log('📎 Attachments received:', JSON.stringify(attachments, null, 2));
+  
   // Check if user sent a location
   const locationAttachment = attachments.find(att => att.type === 'location');
   
+  console.log('🔍 Location attachment found:', locationAttachment ? 'YES' : 'NO');
+  
 if (locationAttachment) {
+  console.log('📍 Full location payload:', JSON.stringify(locationAttachment, null, 2));
+  
   const coords = locationAttachment.payload.coordinates;
   const lat = coords.lat;
   const long = coords.long;
