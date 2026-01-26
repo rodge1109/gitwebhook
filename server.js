@@ -1389,6 +1389,22 @@ app.post('/webhook', async (req, res) => {
         for (const messaging of entry.messaging) {
           const senderPsid = messaging.sender.id;
 
+          // 🔍 DEBUG: Log all incoming messages
+          console.log('\n🔍 INCOMING MESSAGE DEBUG:');
+          console.log('   Has postback:', !!messaging.postback);
+          console.log('   Has message:', !!messaging.message);
+          if (messaging.message) {
+            console.log('   Message has text:', !!messaging.message.text);
+            console.log('   Message has attachments:', !!messaging.message.attachments);
+            if (messaging.message.attachments) {
+              console.log('   Attachments count:', messaging.message.attachments.length);
+              messaging.message.attachments.forEach((att, idx) => {
+                console.log(`   [${idx}] Type: ${att.type}`);
+              });
+            }
+          }
+          console.log('');
+
           if (messaging.postback) {
             const payload = messaging.postback.payload;
             console.log(`Postback received: ${payload}`);
