@@ -1585,6 +1585,43 @@ if (messaging.message && messaging.message.text) {
     continue;
   }
 
+  // ==========================================
+  // PRIORITY: Check if waiting for location (BEFORE keywords)
+  // ==========================================
+  if (bookingSessions[senderPsid] && bookingSessions[senderPsid].step === 'waiting_for_location') {
+    console.log(`📍 Processing location input for ${senderPsid}`);
+    const userLocation = messaging.message.text.trim();
+    
+    if (userLocation.length < 3) {
+      sendTyping(senderPsid, pageToken);
+      setTimeout(() => {
+        callSendAPI(senderPsid, "Please enter a valid location or address (at least 3 characters).", pageToken);
+      }, 1000);
+      continue;
+    }
+    
+    // Store location text
+    userLocations[senderPsid] = {
+      address: userLocation,
+      lat: null,
+      long: null,
+      timestamp: Date.now(),
+      isManual: true
+    };
+    
+    // Send help alert with manual location
+    const alertResult = await sendHelpAlert(senderPsid, pageToken, keywordsSheetId, { address: userLocation });
+    
+    // Clear the location wait session
+    delete bookingSessions[senderPsid];
+    
+    sendTyping(senderPsid, pageToken);
+    setTimeout(() => {
+      callSendAPI(senderPsid, alertResult.message, pageToken);
+    }, 1500);
+    continue; // Skip everything else
+  }
+
   // Refresh keywords on 'refresh data' command
   if (receivedText === 'refresh data') {
     await getKeywords(keywordsSheetId, true);
@@ -1632,44 +1669,6 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
   // Handle booking session
   if (bookingSessions[senderPsid]) {
     console.log(`Processing booking step: ${bookingSessions[senderPsid].step}`);
-
-    // Check if waiting for location (help request)
-    if (bookingSessions[senderPsid].step === 'waiting_for_location') {
-      const userLocation = messaging.message.text.trim();
-      
-      if (userLocation.length < 3) {
-        sendTyping(senderPsid, pageToken);
-        setTimeout(() => {
-          callSendAPI(senderPsid, "Please enter a valid location or address (at least 3 characters).", pageToken);
-        }, 1000);
-        continue;
-      }
-      
-      // Store location text
-      userLocations[senderPsid] = {
-        address: userLocation,
-        lat: null,
-        long: null,
-        timestamp: Date.now(),
-        isManual: true
-      };
-      
-      // Get page config
-      const pageConfig = await getPageConfig(pageId);
-      const keywordsSheetId = pageConfig?.keywordsSheetId;
-      
-      // Send help alert with manual location
-      const alertResult = await sendHelpAlert(senderPsid, pageToken, keywordsSheetId, { address: userLocation });
-      
-      // Clear the location wait session
-      delete bookingSessions[senderPsid];
-      
-      sendTyping(senderPsid, pageToken);
-      setTimeout(() => {
-        callSendAPI(senderPsid, alertResult.message, pageToken);
-      }, 1500);
-      continue;
-    }
 
     // Check if user wants to cancel
     if (receivedText === 'cancel' || receivedText === 'stop' || receivedText === 'exit') {
