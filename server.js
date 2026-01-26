@@ -652,13 +652,20 @@ async function logPSID(psid) {
 async function logHelpRequest(psid, userInfo, location, bookingSheetId) {
   try {
     const timestamp = new Date().toLocaleString('en-PH', { timeZone: 'Asia/Manila' });
+    
+    // Generate Maps link only if coordinates exist
+    let mapsLink = '';
+    if (location?.lat && location?.long) {
+      mapsLink = `https://maps.google.com/?q=${location.lat},${location.long}`;
+    }
+    
     const values = [
       psid,
       userInfo?.fullName || 'Unknown',
       location?.address || 'Not provided',
       location?.lat || '',
       location?.long || '',
-      location ? `https://maps.google.com/?q=${location.lat},${location.long}` : '',
+      mapsLink,
       timestamp
     ];
 
@@ -872,8 +879,10 @@ async function sendHelpAlert(psid, pageToken, keywordsSheetId, location = null, 
       if (location.address) {
        smsMessage += `${location.address}\n`;
       }
-      smsMessage += `Coordinates: ${location.lat}, ${location.long}\n`;
-      smsMessage += `Maps: https://maps.google.com/?q=${location.lat},${location.long}\n`;
+      if (location.lat && location.long) {
+        smsMessage += `Coordinates: ${location.lat}, ${location.long}\n`;
+        smsMessage += `Maps: https://maps.google.com/?q=${location.lat},${location.long}\n`;
+      }
       } else {
       smsMessage += `\nLocation: Not shared\n`;
      }
