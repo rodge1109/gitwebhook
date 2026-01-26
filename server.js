@@ -235,6 +235,7 @@ setInterval(() => {
   });
 }, 60 * 60 * 1000);
 
+
 // ✅ CLEANUP STALE BOOKING SESSIONS
 const BOOKING_TIMEOUT = 30 * 60 * 1000; // 30 minutes
 
@@ -833,31 +834,6 @@ async function sendHelpAlert(psid, pageToken, keywordsSheetId, location = null) 
       };
     }
     
-// =======================
-// REMINDER FOR PENDING HELP REQUESTS
-// =======================
-
-// Check for pending help requests every 30 seconds
-setInterval(() => {
-  pendingHelpRequests.forEach(async (psid) => {
-    const timePending = Date.now() - (userLocations[psid]?.timestamp || 0);
-    
-    // If pending for more than 2 minutes, send reminder
-    if (timePending > 2 * 60 * 1000) {
-      console.log(`⏰ Reminding ${psid} to share location...`);
-      
-      try {
-        // Get page token (you'll need to store this or fetch it)
-        // For now, we'll skip auto-reminder
-        // You can enhance this if needed
-      } catch (error) {
-        console.error('Error sending reminder:', error);
-      }
-    }
-  });
-}, 30 * 1000);
-
-
     // Build SMS message
     let smsMessage = ` HELP REQUEST ALERT \n\n`;
     smsMessage += `From: ${userInfo.fullName}\n`;
@@ -923,7 +899,7 @@ function requestLocation(senderPsid, pageToken) {
   const messageData = {
     recipient: { id: senderPsid },
     message: {
-      text: "📍 Please share your location so I can help you better!\n\n💡 Tap the '+' icon next to the message input box → Select 'Location' → Choose your location",
+      text: "📍 Please share your location so I can help you better!",
       quick_replies: [
         {
           content_type: "location"
@@ -1566,16 +1542,17 @@ if (messaging.message && messaging.message.text) {
     continue;
   }
 
- 
- // ==========================================
+  // ==========================================
 // HANDLE HELP/EMERGENCY REQUEST
 // ==========================================
 if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 'sos') {
   console.log(`🚨 Emergency help request from ${senderPsid}`);
   
+  // Check if user has cached location
   const location = userLocations[senderPsid];
   
   if (location) {
+    // User has location, send alert immediately
     console.log(`✅ Using cached location for ${senderPsid}`);
     
     const alertResult = await sendHelpAlert(senderPsid, pageToken, keywordsSheetId, location);
@@ -1585,29 +1562,16 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
       callSendAPI(senderPsid, alertResult.message, pageToken);
     }, 1500);
   } else {
+    // NO LOCATION - Request it (MANDATORY)
     console.log(`⚠️ No location for ${senderPsid}, requesting now...`);
     
+    // Mark as pending help request
     pendingHelpRequests.add(senderPsid);
     
     sendTyping(senderPsid, pageToken);
-    
-    // Main instruction message
     setTimeout(() => {
-      callSendAPI(
-        senderPsid, 
-        "🚨 EMERGENCY ALERT INITIATED\n\n⚠️ LOCATION REQUIRED\n\nTo send emergency help, we need your current location.\n\n📍 HOW TO SHARE:\n\n📱 MOBILE:\nTap the camera (📷) or dots (⋯) button next to the message box → Select 'Location'\n\n💻 DESKTOP:\nClick the plus (+) button next to the message box → Select 'Location'\n\nThen tap 'Send Current Location' or 'Share Live Location'\n\n⏳ Standing by for your location...",
-        pageToken
-      );
+      requestLocation(senderPsid, pageToken);
     }, 1000);
-    
-    // Helpful tip after 5 seconds
-    setTimeout(() => {
-      callSendAPI(
-        senderPsid,
-        "💡 TIP: The location button is at the BOTTOM of this chat, not in your phone's settings!",
-        pageToken
-      );
-    }, 6000);
   }
   
   continue;
