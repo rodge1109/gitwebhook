@@ -893,18 +893,31 @@ async function sendHelpAlert(psid, pageToken, keywordsSheetId, location = null) 
 }
 
 /**
- * Request location from user with instruction message
+ * Request location from user with button template
  * (Location Quick Reply is deprecated in API v4.0+)
  */
 function requestLocation(senderPsid, pageToken) {
   const messageData = {
     recipient: { id: senderPsid },
     message: {
-      text: "📍 To help you better, please manually share your location:\n\n1. Tap the attachment button (📎) or more options (⋮)\n2. Select 'Location' \n3. Share your current location\n\nWe'll send help immediately once we receive it!"
+      attachment: {
+        type: "template",
+        payload: {
+          template_type: "button",
+          text: "📍 To help you better, we need your location.\n\nPlease share your location using the button below:",
+          buttons: [
+            {
+              type: "postback",
+              title: "📍 Share My Location",
+              payload: "HELP_SHARE_LOCATION"
+            }
+          ]
+        }
+      }
     }
   };
   
-  console.log('Sending location instruction message');
+  console.log('Sending location request with button template');
   
   request(
     {
@@ -915,7 +928,7 @@ function requestLocation(senderPsid, pageToken) {
     },
     (err, res, body) => {
       if (!err && body && !body.error) {
-        console.log('📍 Location instruction sent! Response:', body);
+        console.log('📍 Location request sent! Response:', body);
       } else {
         console.error('❌ Unable to send location request:', err || body?.error);
       }
