@@ -1473,10 +1473,18 @@ app.post('/webhook', async (req, res) => {
               sendTyping(senderPsid, pageToken);
               setTimeout(() => {
                 callSendAPI(senderPsid, 
-                  "📍 To share your location:\n\n1. Tap the attachment button (📎) in Messenger\n2. Select 'Location'\n3. Share your current location\n\nOnce you share it, we'll immediately send help!",
+                  "📍 To send help, please share your location:\n\n**OPTION 1 - Automatic (Recommended):**\nLook for the attachment/paperclip icon (📎) near the message input box, tap it, select 'Location', and share.\n\n**OPTION 2 - Manual (If no attachment button):**\nIf you don't see an attachment button, simply type or paste your address/location below.\n\nExample: 'Manila, Philippines' or 'Makati City, BGC'",
                   pageToken
                 );
               }, 1000);
+              
+              // Mark as pending so we can process either location or text
+              if (!bookingSessions[senderPsid]) {
+                bookingSessions[senderPsid] = {
+                  step: 'waiting_for_location',
+                  startedAt: new Date()
+                };
+              }
             }
             continue;
           }
@@ -1624,6 +1632,44 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
   // Handle booking session
   if (bookingSessions[senderPsid]) {
     console.log(`Processing booking step: ${bookingSessions[senderPsid].step}`);
+
+    // Check if waiting for location (help request)
+    if (bookingSessions[senderPsid].step === 'waiting_for_location') {
+      const userLocation = messaging.message.text.trim();
+      
+      if (userLocation.length < 3) {
+        sendTyping(senderPsid, pageToken);
+        setTimeout(() => {
+          callSendAPI(senderPsid, "Please enter a valid location or address (at least 3 characters).", pageToken);
+        }, 1000);
+        continue;
+      }
+      
+      // Store location text
+      userLocations[senderPsid] = {
+        address: userLocation,
+        lat: null,
+        long: null,
+        timestamp: Date.now(),
+        isManual: true
+      };
+      
+      // Get page config
+      const pageConfig = await getPageConfig(pageId);
+      const keywordsSheetId = pageConfig?.keywordsSheetId;
+      
+      // Send help alert with manual location
+      const alertResult = await sendHelpAlert(senderPsid, pageToken, keywordsSheetId, { address: userLocation });
+      
+      // Clear the location wait session
+      delete bookingSessions[senderPsid];
+      
+      sendTyping(senderPsid, pageToken);
+      setTimeout(() => {
+        callSendAPI(senderPsid, alertResult.message, pageToken);
+      }, 1500);
+      continue;
+    }
 
     // Check if user wants to cancel
     if (receivedText === 'cancel' || receivedText === 'stop' || receivedText === 'exit') {
