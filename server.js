@@ -902,11 +902,14 @@ function requestLocation(senderPsid, pageToken) {
       text: "📍 Please share your location so I can help you better!",
       quick_replies: [
         {
-          content_type: "location"
+          content_type: "location",
+          title: "Share Location"
         }
       ]
     }
   };
+  
+  console.log('Sending location request with data:', JSON.stringify(messageData, null, 2));
   
   request(
     {
@@ -916,10 +919,10 @@ function requestLocation(senderPsid, pageToken) {
       json: messageData
     },
     (err, res, body) => {
-      if (!err) {
-        console.log('📍 Location request sent!');
+      if (!err && body && !body.error) {
+        console.log('📍 Location request sent! Response:', body);
       } else {
-        console.error('❌ Unable to send location request:', err);
+        console.error('❌ Unable to send location request:', err || body?.error);
       }
     }
   );
