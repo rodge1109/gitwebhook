@@ -672,7 +672,7 @@ async function logHelpRequest(psid, userInfo, location, bookingSheetId) {
     await sheets.spreadsheets.values.append({
       spreadsheetId: bookingSheetId,
       range: 'HelpRequests!A:G',
-      valueInputOption: 'RAW'
+      valueInputOption: 'RAW',
       insertDataOption: 'INSERT_ROWS',
       resource: {
         values: [values],
