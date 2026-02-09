@@ -70,7 +70,7 @@ app.get('/health', async (req, res) => {
   }
 });
 
-
+//SMS INTEGRATION
 // =======================
 // SMS INTEGRATION (Semaphore)
 // =======================
@@ -672,7 +672,7 @@ async function logHelpRequest(psid, userInfo, location, bookingSheetId) {
     await sheets.spreadsheets.values.append({
       spreadsheetId: bookingSheetId,
       range: 'HelpRequests!A:G',
-      valueInputOption: 'RAW',
+      valueInputOption: 'RAW'
       insertDataOption: 'INSERT_ROWS',
       resource: {
         values: [values],
@@ -1864,6 +1864,44 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
       reply = responses[Math.floor(Math.random() * responses.length)];
     }
   }
+
+   let reply = "Sorry, I didn't understand that. Can you please rephrase?";
+   let imageUrls = [];
+
+   if (match) {
+     const column_c = match[2] ? match[2].trim() : null;
+@@
+     }
+   }
+
++  // Convert bracketed tokens like "[Help]" into postback buttons
++  const buttonPattern = /\[([^\]]+)\]/g;
++  const buttonMatches = [...reply.matchAll(buttonPattern)];
++  if (buttonMatches.length && imageUrls.length === 0) {
++    const buttons = buttonMatches.slice(0, 3).map((m, idx) => ({
++      type: "postback",
++      title: m[1].trim(),
++      payload: `BTN_${m[1].toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_${idx}`
++    }));
++
++    const cleanText = reply.replace(buttonPattern, '').replace(/\s+/g, ' ').trim()
++      || 'Please choose an option:';
++
++    callSendAPI(senderPsid, null, pageToken, null, {
++      type: "template",
++      payload: {
++        template_type: "button",
++        text: cleanText,
++        buttons
++      }
++    });
++    continue;
++  }
++
+   sendTyping(senderPsid, pageToken);
+   setTimeout(() => {
+     callSendAPI(senderPsid, reply, pageToken);
+
 
   sendTyping(senderPsid, pageToken);
   setTimeout(() => {
