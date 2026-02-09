@@ -1841,29 +1841,6 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
     return keywordList.some(keyword => receivedText.includes(keyword));
   });
 
-  let reply = "Sorry, I didn't understand that. Can you please rephrase?";
-  let imageUrls = [];
-
-  if (match) {
-    const column_c = match[2] ? match[2].trim() : null;
-
-    console.log('Column C value:', column_c);
-
-    if (column_c && (column_c.startsWith('http://') || column_c.startsWith('https://') || column_c.includes('drive.google.com'))) {
-      imageUrls = column_c.split('|').map(url => url.trim()).filter(url => url.length > 0);
-      console.log('Image URLs detected:', imageUrls);
-    }
-
-    const action = column_c && imageUrls.length === 0 ? column_c.toLowerCase() : null;
-
-    if (action && imageUrls.length === 0) {
-      const actionResult = await executeSpecialAction(action);
-      reply = actionResult || match[1];
-    } else if (match[1]) {
-      const responses = match[1].split('|').map(r => r.trim());
-      reply = responses[Math.floor(Math.random() * responses.length)];
-    }
-  }
 
    let reply = "Sorry, I didn't understand that. Can you please rephrase?";
    let imageUrls = [];
