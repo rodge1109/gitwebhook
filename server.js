@@ -1610,9 +1610,10 @@ if (locationAttachment) {
 }
 }
 
-          // Handle text messages
-if (messaging.message && messaging.message.text) {
-  const receivedText = messaging.message.text.toLowerCase().trim();
+          // Handle text messages (including quick replies)
+if (messaging.message && (messaging.message.text || messaging.message.quick_reply)) {
+  const qrPayload = messaging.message.quick_reply?.payload;
+  const receivedText = (qrPayload || messaging.message.text || '').toLowerCase().trim();
   
   // Get page config first
   const pageConfig = await getPageConfig(pageId);
@@ -1842,32 +1843,66 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
   });
 
   let reply = "Sorry, I didn't understand that. Can you please rephrase?";
+  let secondaryText = null;
   let imageUrls = [];
 
   if (match) {
     const column_c = match[2] ? match[2].trim() : null;
-
     console.log('Column C value:', column_c);
 
-    if (column_c && (column_c.startsWith('http://') || column_c.startsWith('https://') || column_c.includes('drive.google.com'))) {
-      imageUrls = column_c.split('|').map(url => url.trim()).filter(url => url.length > 0);
-      console.log('Image URLs detected:', imageUrls);
-    }
-
-    const action = column_c && imageUrls.length === 0 ? column_c.toLowerCase() : null;
-
-    if (action && imageUrls.length === 0) {
-      const actionResult = await executeSpecialAction(action);
-      reply = actionResult || match[1];
-    } else if (match[1]) {
+    // Primary reply from column B (if present)
+    if (match[1]) {
       const responses = match[1].split('|').map(r => r.trim());
       reply = responses[Math.floor(Math.random() * responses.length)];
+    }
+
+    // Handle column C extras: action, text, or image URLs
+    if (column_c) {
+      const isUrlLike = (text) =>
+        text.startsWith('http://') || text.startsWith('https://') || text.includes('drive.google.com');
+
+      if (isUrlLike(column_c)) {
+        imageUrls = column_c.split('|').map(url => url.trim()).filter(url => url.length > 0);
+        console.log('Image URLs detected:', imageUrls);
+      } else {
+        // Try special action first; if no action result, treat as secondary text
+        const actionResult = await executeSpecialAction(column_c.toLowerCase(), senderPsid, pageToken);
+        if (actionResult) {
+          reply = actionResult;
+        } else {
+          secondaryText = column_c;
+        }
+      }
     }
   }
 
   // Convert bracketed tokens like "[Help]" into postback buttons
   const buttonPattern = /\[([^\]]+)\]/g;
   const buttonMatches = [...reply.matchAll(buttonPattern)];
+  const sendSecondary = () => {
+    if (!secondaryText) return;
+    const secMatches = [...secondaryText.matchAll(buttonPattern)];
+    if (secMatches.length) {
+      const secButtons = secMatches.slice(0, 3).map((m, idx) => ({
+        type: "postback",
+        title: m[1].trim(),
+        payload: `BTN_${m[1].toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_${idx}`
+      }));
+      const cleanSecondary = secondaryText.replace(buttonPattern, '').replace(/\s+/g, ' ').trim()
+        || 'Please choose an option:';
+      callSendAPI(senderPsid, null, pageToken, null, {
+        type: "template",
+        payload: {
+          template_type: "button",
+          text: cleanSecondary,
+          buttons: secButtons
+        }
+      });
+    } else {
+      callSendAPI(senderPsid, secondaryText, pageToken);
+    }
+  };
+
   if (buttonMatches.length && imageUrls.length === 0) {
     const buttons = buttonMatches.slice(0, 3).map((m, idx) => ({
       type: "postback",
@@ -1886,12 +1921,20 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
         buttons
       }
     });
+    sendSecondary();
+    if (imageUrls.length > 0) {
+      imageUrls.forEach(url => {
+        callSendAPI(senderPsid, null, pageToken, null, null, url);
+      });
+    }
     continue;
   }
 
   sendTyping(senderPsid, pageToken);
   setTimeout(() => {
     callSendAPI(senderPsid, reply, pageToken);
+
+    sendSecondary();
 
     if (imageUrls.length > 0) {
       imageUrls.forEach(url => {
