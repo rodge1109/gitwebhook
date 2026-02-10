@@ -1613,8 +1613,8 @@ if (locationAttachment) {
           // Handle text messages (including quick replies)
 if (messaging.message && (messaging.message.text || messaging.message.quick_reply)) {
   const qrPayload = messaging.message.quick_reply?.payload;
-  const rawText = messaging.message.text || '';
-  const receivedText = (rawText || qrPayload || '').toLowerCase().trim();
+  const userInput = messaging.message.text || qrPayload || '';
+  const receivedText = userInput.toLowerCase().trim();
   
   // Get page config first
   const pageConfig = await getPageConfig(pageId);
@@ -1636,7 +1636,7 @@ if (messaging.message && (messaging.message.text || messaging.message.quick_repl
   // ==========================================
   if (bookingSessions[senderPsid] && bookingSessions[senderPsid].step === 'waiting_for_location') {
     console.log(`📍 Processing location input for ${senderPsid}`);
-    const userLocation = messaging.message.text.trim();
+    const userLocation = userInput.trim();
     
     if (userLocation.length < 3) {
       sendTyping(senderPsid, pageToken);
@@ -1728,7 +1728,7 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
 
     // Check if waiting for a custom date
     if (bookingSessions[senderPsid].waitingForCustomDate) {
-      const customDate = messaging.message.text;
+      const customDate = userInput;
 
       // Validate the custom date
       const validation = validateDateFormat(customDate);
@@ -1769,7 +1769,7 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
     }
 
     // Proceed with booking if not waiting for a custom date
-    const bookingReply = processBooking(senderPsid, messaging.message.text);
+    const bookingReply = processBooking(senderPsid, userInput);
 
     if (bookingSessions[senderPsid] && bookingSessions[senderPsid].completed) {
       const session = bookingSessions[senderPsid];
