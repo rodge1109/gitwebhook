@@ -1613,7 +1613,8 @@ if (locationAttachment) {
           // Handle text messages (including quick replies)
 if (messaging.message && (messaging.message.text || messaging.message.quick_reply)) {
   const qrPayload = messaging.message.quick_reply?.payload;
-  const receivedText = (qrPayload || messaging.message.text || '').toLowerCase().trim();
+  const rawText = messaging.message.text || '';
+  const receivedText = (rawText || qrPayload || '').toLowerCase().trim();
   
   // Get page config first
   const pageConfig = await getPageConfig(pageId);
@@ -1628,6 +1629,92 @@ if (messaging.message && (messaging.message.text || messaging.message.quick_repl
       callSendAPI(senderPsid, "Sorry, configuration error. Please contact support.", pageToken);
     }, 1000);
     continue;
+  }
+
+  // ==========================================
+  // QUICK REPLY PAYLOAD SHORT-CIRCUITS (mirror postback handling)
+  // ==========================================
+  if (qrPayload) {
+    const payload = qrPayload;
+
+    if (payload === 'BOOKING_YES') {
+      if (bookingSessions[senderPsid] && bookingSessions[senderPsid].step === 0) {
+        const nextQuestion = askQuestion(senderPsid, 1);
+        bookingSessions[senderPsid].step = 1;
+
+        sendTyping(senderPsid, pageToken);
+        setTimeout(() => {
+          if (nextQuestion.template) {
+            callSendAPI(senderPsid, null, pageToken, null, nextQuestion.template);
+          } else if (nextQuestion.quickReplies) {
+            callSendAPI(senderPsid, nextQuestion.text, pageToken, nextQuestion.quickReplies);
+          } else {
+            callSendAPI(senderPsid, nextQuestion.text, pageToken);
+          }
+        }, 1000);
+      }
+      continue;
+    } else if (payload === 'BOOKING_NO') {
+      delete bookingSessions[senderPsid];
+      sendTyping(senderPsid, pageToken);
+      setTimeout(() => {
+        callSendAPI(senderPsid, "Booking cancelled. No problem! Feel free to book anytime.", pageToken);
+      }, 1000);
+      continue;
+    } else if (payload.startsWith('BOOKING_ANSWER_')) {
+      const answer = payload.replace('BOOKING_ANSWER_', '').replace(/_/g, ' ');
+
+      if (answer === 'Other date' || payload === 'BOOKING_ANSWER_CUSTOM_DATE') {
+        bookingSessions[senderPsid].waitingForCustomDate = true;
+        sendTyping(senderPsid, pageToken);
+        setTimeout(() => {
+          callSendAPI(senderPsid, "Please type your preferred date (e.g., December 15, 2025):", pageToken);
+        }, 1000);
+        continue;
+      }
+
+      if (bookingSessions[senderPsid]) {
+        const currentStep = bookingSessions[senderPsid].step;
+        const stepConfig = bookingSessions[senderPsid].config[currentStep - 1];
+        if (stepConfig) {
+          bookingSessions[senderPsid].data[stepConfig[0]] = answer;
+        }
+
+        const nextQuestion = processBookingStep(senderPsid, answer);
+
+        sendTyping(senderPsid, pageToken);
+        setTimeout(() => {
+          if (nextQuestion.template) {
+            callSendAPI(senderPsid, null, pageToken, null, nextQuestion.template);
+          } else if (nextQuestion.quickReplies) {
+            callSendAPI(senderPsid, nextQuestion.text, pageToken, nextQuestion.quickReplies);
+          } else {
+            callSendAPI(senderPsid, nextQuestion.text, pageToken);
+          }
+        }, 1000);
+      }
+      continue;
+    } else if (payload === 'HELP_SHARE_LOCATION') {
+      console.log(`📍 User clicked location button for help request (quick reply)`);
+
+      sendTyping(senderPsid, pageToken);
+      setTimeout(() => {
+        callSendAPI(
+          senderPsid,
+          "📍 To send help, please share your location:\n\n**OPTION 1 - Automatic (Recommended):**\nLook for the attachment/paperclip icon (📎) near the message input box, tap it, select 'Location', and share.\n\n**OPTION 2 - Manual (If no attachment button):**\nIf you don't see an attachment button, simply type or paste your address/location below.\n\nExample: 'Manila, Philippines' or 'Makati City, BGC'",
+          pageToken
+        );
+      }, 1000);
+
+      if (!bookingSessions[senderPsid]) {
+        bookingSessions[senderPsid] = {
+          step: 'waiting_for_location',
+          startedAt: new Date()
+        };
+      }
+      continue;
+    }
+    // else fall through to keyword flow with receivedText
   }
 
   // ==========================================
