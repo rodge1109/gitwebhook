@@ -1468,6 +1468,7 @@ app.post('/webhook', async (req, res) => {
                   }
                 }, 1000);
               }
+              continue;
             } else if (payload === 'BOOKING_NO') {
               // Booking flow for NO
               delete bookingSessions[senderPsid];
@@ -1475,6 +1476,7 @@ app.post('/webhook', async (req, res) => {
               setTimeout(() => {
                 callSendAPI(senderPsid, "Booking cancelled. No problem! Feel free to book anytime.", pageToken);
               }, 1000);
+              continue;
             } else if (payload.startsWith('BOOKING_ANSWER_')) {
               // Handle booking answers
               const answer = payload.replace('BOOKING_ANSWER_', '').replace(/_/g, ' ');
@@ -1508,6 +1510,7 @@ app.post('/webhook', async (req, res) => {
                   }
                 }, 1000);
               }
+              continue;
             } else if (payload === 'HELP_SHARE_LOCATION') {
               // Handle help location request
               console.log(`📍 User clicked location button for help request`);
@@ -1527,8 +1530,12 @@ app.post('/webhook', async (req, res) => {
                   startedAt: new Date()
                 };
               }
+              continue;
+            } else {
+              // Non-order postback: treat button title as typed text for keyword matching
+              console.log(`🔄 Non-order postback, treating as text: "${messaging.postback.title}"`);
+              messaging.message = { text: messaging.postback.title || payload };
             }
-            continue;
           }
 
 // ==========================================
