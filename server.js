@@ -10,6 +10,7 @@ const app = express();
 app.use(bodyParser.json());
 
 const pendingHelpRequests = new Set();
+const keywordMissCounters = {};
 
 
 /* =======================
@@ -1853,6 +1854,22 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
   let reply = "Sorry, I didn't understand that. Can you please rephrase?";
   let secondaryText = null;
   let imageUrls = [];
+
+  // Track keyword misses per user
+  if (!match) {
+    keywordMissCounters[senderPsid] = (keywordMissCounters[senderPsid] || 0) + 1;
+    console.log(`❌ Keyword miss #${keywordMissCounters[senderPsid]} for ${senderPsid}`);
+
+    if (keywordMissCounters[senderPsid] >= 3) {
+      sendTyping(senderPsid, pageToken);
+      setTimeout(() => {
+        callSendAPI(senderPsid, "It seems I can't help with that right now. Our admin will respond to you when available. Thank you for your patience!", pageToken);
+      }, 1500);
+      continue;
+    }
+  } else {
+    keywordMissCounters[senderPsid] = 0;
+  }
 
   if (match) {
     const column_c = match[2] ? match[2].trim() : null;
