@@ -1860,11 +1860,16 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
     keywordMissCounters[senderPsid] = (keywordMissCounters[senderPsid] || 0) + 1;
     console.log(`❌ Keyword miss #${keywordMissCounters[senderPsid]} for ${senderPsid}`);
 
-    if (keywordMissCounters[senderPsid] >= 3) {
+    if (keywordMissCounters[senderPsid] === 3) {
+      // 3rd miss: send handoff message
       sendTyping(senderPsid, pageToken);
       setTimeout(() => {
         callSendAPI(senderPsid, "It seems I can't help with that right now. Our admin will respond to you when available. Thank you for your patience!", pageToken);
       }, 1500);
+      continue;
+    } else if (keywordMissCounters[senderPsid] > 3) {
+      // 4+ misses: go silent, no reply at all
+      console.log(`🔇 Silent mode for ${senderPsid} (miss #${keywordMissCounters[senderPsid]})`);
       continue;
     }
   } else {
@@ -1901,18 +1906,26 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
     }
   }
 
-  // Convert bracketed tokens like "[Help]" into postback buttons
-  const buttonPattern = /\[([^\]]+)\]/g;
+  // Convert bracketed tokens into buttons
+  // [Button Text] → postback button
+  // [Button Text](https://example.com) → URL button
+  const buttonPattern = /\[([^\]]+)\](?:\(([^)]+)\))?/g;
   const buttonMatches = [...reply.matchAll(buttonPattern)];
+
+  const makeButton = (m, idx) => {
+    const title = m[1].trim();
+    const url = m[2] ? m[2].trim() : null;
+    if (url) {
+      return { type: "web_url", title, url };
+    }
+    return { type: "postback", title, payload: `BTN_${title.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_${idx}` };
+  };
+
   const sendSecondary = () => {
     if (!secondaryText) return;
     const secMatches = [...secondaryText.matchAll(buttonPattern)];
     if (secMatches.length) {
-      const secButtons = secMatches.slice(0, 3).map((m, idx) => ({
-        type: "postback",
-        title: m[1].trim(),
-        payload: `BTN_${m[1].toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_${idx}`
-      }));
+      const secButtons = secMatches.slice(0, 3).map((m, idx) => makeButton(m, idx));
       const cleanSecondary = secondaryText.replace(buttonPattern, '').replace(/\s+/g, ' ').trim()
         || 'Please choose an option:';
       callSendAPI(senderPsid, null, pageToken, null, {
@@ -1929,11 +1942,7 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
   };
 
   if (buttonMatches.length && imageUrls.length === 0) {
-    const buttons = buttonMatches.slice(0, 3).map((m, idx) => ({
-      type: "postback",
-      title: m[1].trim(),
-      payload: `BTN_${m[1].toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_${idx}`
-    }));
+    const buttons = buttonMatches.slice(0, 3).map((m, idx) => makeButton(m, idx));
 
     const cleanText = reply.replace(buttonPattern, '').replace(/\s+/g, ' ').trim()
       || 'Please choose an option:';
