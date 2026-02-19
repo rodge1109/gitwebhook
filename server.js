@@ -11,6 +11,7 @@ app.use(bodyParser.json());
 
 const pendingHelpRequests = new Set();
 const keywordMissCounters = {};
+const greetedUsers = new Set();
 
 
 /* =======================
@@ -1002,13 +1003,24 @@ function sendTyping(senderPsid, pageToken) {
   );
 }
 
-function callSendAPI(senderPsid, response, pageToken, quickReplies = null, template = null, imageUrl = null) {
+function callSendAPI(senderPsid, response, pageToken, quickReplies = null, template = null, imageUrl = null, fileUrl = null) {
   let messageData = {
     recipient: { id: senderPsid }
   };
-  
+
   if (template) {
     messageData.message = { attachment: template };
+  } else if (fileUrl) {
+    console.log('Sending file:', fileUrl);
+    messageData.message = {
+      attachment: {
+        type: 'file',
+        payload: {
+          url: fileUrl,
+          is_reusable: true
+        }
+      }
+    };
   } else if (imageUrl) {
     console.log('Sending image:', imageUrl);
     messageData.message = {
@@ -1821,6 +1833,56 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
 
   const keywords = await getKeywords(keywordsSheetId);
 
+  // First message from user: fire "welcome" keyword
+  if (!greetedUsers.has(senderPsid)) {
+    greetedUsers.add(senderPsid);
+    console.log(`👋 First message from ${senderPsid}, sending welcome`);
+
+    const welcomeMatch = keywords.find(row => {
+      if (!row[0]) return false;
+      const keywordList = row[0].toLowerCase().split(',').map(k => k.trim());
+      return keywordList.includes('welcome');
+    });
+
+    if (welcomeMatch && welcomeMatch[1]) {
+      const responses = welcomeMatch[1].split('|').map(r => r.trim());
+      const welcomeReply = responses[Math.floor(Math.random() * responses.length)];
+
+      let welcomeImageUrls = [];
+      let welcomeFileUrls = [];
+      const welcomeColumnC = welcomeMatch[2] ? welcomeMatch[2].trim() : null;
+
+      if (welcomeColumnC) {
+        const isUrlLike = (text) =>
+          text.startsWith('http://') || text.startsWith('https://') || text.includes('drive.google.com');
+
+        if (isUrlLike(welcomeColumnC)) {
+          const allUrls = welcomeColumnC.split('|').map(url => url.trim()).filter(url => url.length > 0);
+          allUrls.forEach(url => {
+            const lowerUrl = url.toLowerCase();
+            if (lowerUrl.endsWith('.pdf') || lowerUrl.endsWith('.doc') || lowerUrl.endsWith('.docx') || lowerUrl.endsWith('.xls') || lowerUrl.endsWith('.xlsx') || lowerUrl.includes('export=download')) {
+              welcomeFileUrls.push(url);
+            } else {
+              welcomeImageUrls.push(url);
+            }
+          });
+        }
+      }
+
+      sendTyping(senderPsid, pageToken);
+      setTimeout(() => {
+        callSendAPI(senderPsid, welcomeReply, pageToken);
+        welcomeImageUrls.forEach(url => {
+          callSendAPI(senderPsid, null, pageToken, null, null, url);
+        });
+        welcomeFileUrls.forEach(url => {
+          callSendAPI(senderPsid, null, pageToken, null, null, null, url);
+        });
+      }, 1500);
+      continue;
+    }
+  }
+
   // Check for order or booking commands
   if (receivedText.includes('order') || receivedText.includes('book')) {
     const bookingConfig = await getBookingConfig(bookingSheetId);
@@ -1854,6 +1916,7 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
   let reply = "Sorry, I didn't understand that. Can you please rephrase?";
   let secondaryText = null;
   let imageUrls = [];
+  let fileUrls = [];
 
   // Track keyword misses per user
   if (!match) {
@@ -1892,8 +1955,17 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
         text.startsWith('http://') || text.startsWith('https://') || text.includes('drive.google.com');
 
       if (isUrlLike(column_c)) {
-        imageUrls = column_c.split('|').map(url => url.trim()).filter(url => url.length > 0);
+        const allUrls = column_c.split('|').map(url => url.trim()).filter(url => url.length > 0);
+        allUrls.forEach(url => {
+          const lowerUrl = url.toLowerCase();
+          if (lowerUrl.endsWith('.pdf') || lowerUrl.endsWith('.doc') || lowerUrl.endsWith('.docx') || lowerUrl.endsWith('.xls') || lowerUrl.endsWith('.xlsx') || lowerUrl.includes('export=download')) {
+            fileUrls.push(url);
+          } else {
+            imageUrls.push(url);
+          }
+        });
         console.log('Image URLs detected:', imageUrls);
+        console.log('File URLs detected:', fileUrls);
       } else {
         // Try special action first; if no action result, treat as secondary text
         const actionResult = await executeSpecialAction(column_c.toLowerCase(), senderPsid, pageToken);
@@ -1961,6 +2033,11 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
         callSendAPI(senderPsid, null, pageToken, null, null, url);
       });
     }
+    if (fileUrls.length > 0) {
+      fileUrls.forEach(url => {
+        callSendAPI(senderPsid, null, pageToken, null, null, null, url);
+      });
+    }
     continue;
   }
 
@@ -1973,6 +2050,11 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
     if (imageUrls.length > 0) {
       imageUrls.forEach(url => {
         callSendAPI(senderPsid, null, pageToken, null, null, url);
+      });
+    }
+    if (fileUrls.length > 0) {
+      fileUrls.forEach(url => {
+        callSendAPI(senderPsid, null, pageToken, null, null, null, url);
       });
     }
   }, 1500);
