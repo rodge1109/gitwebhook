@@ -11,7 +11,18 @@ app.use(bodyParser.json());
 
 const pendingHelpRequests = new Set();
 const keywordMissCounters = {};
-const greetedUsers = new Set();
+const greetedUsers = {};
+
+// Clean up greeted users older than 24 hours
+setInterval(() => {
+  const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);
+  Object.keys(greetedUsers).forEach(psid => {
+    if (greetedUsers[psid] < oneDayAgo) {
+      delete greetedUsers[psid];
+      console.log(`👋 Welcome reset for ${psid} (24h expired)`);
+    }
+  });
+}, 60 * 60 * 1000);
 
 
 /* =======================
@@ -1833,9 +1844,11 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
 
   const keywords = await getKeywords(keywordsSheetId);
 
-  // First message from user: fire "welcome" keyword
-  if (!greetedUsers.has(senderPsid)) {
-    greetedUsers.add(senderPsid);
+  // First message from user (or 24h since last): fire "welcome" keyword
+  const lastGreeted = greetedUsers[senderPsid] || 0;
+  const twentyFourHours = 24 * 60 * 60 * 1000;
+  if (Date.now() - lastGreeted > twentyFourHours) {
+    greetedUsers[senderPsid] = Date.now();
     console.log(`👋 First message from ${senderPsid}, sending welcome`);
 
     const welcomeMatch = keywords.find(row => {
