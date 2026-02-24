@@ -590,23 +590,15 @@ async function saveOrder(psid, orderData, bookingSheetId) {
 // =======================
 
 const BILL_SHEET_ID = '1_H-OIoLXyxbGsr7gezxc2AbpnUEaVidb-WRjTGFXRfQ';
+const BILL_TAB_NAME = 'LatestBill';
 
 async function lookupBill(conscode) {
   try {
     console.log(`🔍 Looking up bill for conscode: "${conscode}"`);
 
-    // Auto-detect the correct sheet tab name
-    const meta = await sheets.spreadsheets.get({ spreadsheetId: BILL_SHEET_ID });
-    const sheetNames = meta.data.sheets.map(s => s.properties.title);
-    console.log('📄 Available tabs in bill sheet:', sheetNames);
-
-    // Find tab containing "UD" (case-insensitive), fallback to first tab
-    const tabName = sheetNames.find(n => n.toLowerCase().includes('ud')) || sheetNames[0];
-    console.log(`📌 Using tab: "${tabName}"`);
-
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId: BILL_SHEET_ID,
-      range: `${tabName}!A:Z`,
+      range: `${BILL_TAB_NAME}!A:Z`,
     });
 
     const rows = res.data.values || [];
@@ -2395,13 +2387,9 @@ app.get('/check-subscriptions', async (req, res) => {
 app.get('/check-bill-sheet', async (req, res) => {
   const conscode = req.query.conscode || '';
   try {
-    const meta = await sheets.spreadsheets.get({ spreadsheetId: BILL_SHEET_ID });
-    const sheetNames = meta.data.sheets.map(s => s.properties.title);
-    const tabName = sheetNames.find(n => n.toLowerCase().includes('ud')) || sheetNames[0];
-
     const sheetRes = await sheets.spreadsheets.values.get({
       spreadsheetId: BILL_SHEET_ID,
-      range: `${tabName}!A:Z`,
+      range: `${BILL_TAB_NAME}!A:Z`,
     });
     const rows = sheetRes.data.values || [];
     const headers = rows[0] || [];
