@@ -631,16 +631,20 @@ async function lookupBill(conscode) {
 
     // Log all conscode values found in the sheet for comparison
     const allConscodes = rows.slice(1).map(r => r[idxConscode]);
-    console.log('📋 All conscodes in sheet:', allConscodes);
+    console.log('📋 All conscodes in sheet:', JSON.stringify(allConscodes));
 
-    // Find the row matching the conscode (string or numeric comparison)
-    const userVal = conscode.trim();
+    // Strip everything except digits for a clean numeric comparison
+    const digitsOnly = (s) => s.toString().replace(/[^0-9]/g, '');
+    const userDigits = digitsOnly(conscode);
+    console.log(`🔢 User conscode digits: "${userDigits}"`);
+
     const row = rows.slice(1).find(r => {
       if (!r[idxConscode]) return false;
-      const sheetVal = r[idxConscode].toString().trim();
-      // Try exact string match first, then numeric match as fallback
-      return sheetVal.toLowerCase() === userVal.toLowerCase() ||
-        (!isNaN(Number(sheetVal)) && !isNaN(Number(userVal)) && Number(sheetVal) === Number(userVal));
+      const sheetVal = r[idxConscode].toString();
+      const sheetDigits = digitsOnly(sheetVal);
+      const match = sheetDigits === userDigits || sheetVal.trim().toLowerCase() === conscode.trim().toLowerCase();
+      if (match) console.log(`✅ Matched: sheet="${sheetVal}" digits="${sheetDigits}" vs user="${conscode}" digits="${userDigits}"`);
+      return match;
     });
 
     if (!row) {
