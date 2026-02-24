@@ -633,10 +633,15 @@ async function lookupBill(conscode) {
     const allConscodes = rows.slice(1).map(r => r[idxConscode]);
     console.log('📋 All conscodes in sheet:', allConscodes);
 
-    // Find the row matching the conscode (case-insensitive)
-    const row = rows.slice(1).find(r =>
-      r[idxConscode] && r[idxConscode].toString().toLowerCase().trim() === conscode.toLowerCase().trim()
-    );
+    // Find the row matching the conscode (string or numeric comparison)
+    const userVal = conscode.trim();
+    const row = rows.slice(1).find(r => {
+      if (!r[idxConscode]) return false;
+      const sheetVal = r[idxConscode].toString().trim();
+      // Try exact string match first, then numeric match as fallback
+      return sheetVal.toLowerCase() === userVal.toLowerCase() ||
+        (!isNaN(Number(sheetVal)) && !isNaN(Number(userVal)) && Number(sheetVal) === Number(userVal));
+    });
 
     if (!row) {
       console.log(`❌ No match found for conscode: "${conscode}"`);
