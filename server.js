@@ -2064,6 +2064,15 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
     keywordMissCounters[senderPsid] = (keywordMissCounters[senderPsid] || 0) + 1;
     console.log(`❌ Keyword miss #${keywordMissCounters[senderPsid]} for ${senderPsid}`);
 
+    if (keywordMissCounters[senderPsid] === 1) {
+      // 1st miss: greet by name
+      const userInfo = await getUserInfo(senderPsid, pageToken);
+      const firstName = userInfo?.firstName && userInfo.firstName !== 'Unknown' ? userInfo.firstName : null;
+      reply = firstName
+        ? `Hi ${firstName}! I want to make sure I help you correctly. Could you please clarify your question?`
+        : `Hi! I want to make sure I help you correctly. Could you please clarify your question?`;
+    }
+
     if (keywordMissCounters[senderPsid] === 3) {
       // 3rd miss: send handoff message
       sendTyping(senderPsid, pageToken);
