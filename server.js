@@ -2054,7 +2054,7 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
     return keywordList.some(keyword => receivedText.includes(keyword));
   });
 
-  let reply = "Sorry, I didn't understand that. Can you please rephrase?";
+  let reply = "Hi! I want to make sure I help you correctly. Could you please clarify your question?";
   let secondaryText = null;
   let imageUrls = [];
   let fileUrls = [];
@@ -2071,8 +2071,8 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
         callSendAPI(senderPsid, "It seems I can't help with that right now. Our admin will respond to you when available. Thank you for your patience!", pageToken);
       }, 1500);
       continue;
-    } else if (keywordMissCounters[senderPsid] > 3) {
-      // 4+ misses: go silent, no reply at all
+    } else if (keywordMissCounters[senderPsid] >= 2) {
+      // 2nd miss and 4+ misses: go silent, no reply at all
       console.log(`🔇 Silent mode for ${senderPsid} (miss #${keywordMissCounters[senderPsid]})`);
       continue;
     }
