@@ -10,6 +10,7 @@ const app = express();
 app.use(bodyParser.json());
 
 const pendingHelpRequests = new Set();
+const pausedPages = new Set();
 const keywordMissCounters = {};
 const greetedUsers = {};
 const billSessions = {};
@@ -1563,6 +1564,19 @@ app.post('/webhook', async (req, res) => {
           }
           console.log('');
 
+          // Handle admin echo commands (!pause / !resume)
+          if (messaging.message && messaging.message.is_echo) {
+            const echoText = (messaging.message.text || '').trim().toLowerCase();
+            if (echoText === '!pause') {
+              pausedPages.add(pageId);
+              console.log(`⏸️ Auto-reply PAUSED for all users on page ${pageId} by admin`);
+            } else if (echoText === '!resume') {
+              pausedPages.delete(pageId);
+              console.log(`▶️ Auto-reply RESUMED for all users on page ${pageId} by admin`);
+            }
+            continue; // Never process admin echoes as user messages
+          }
+
           if (messaging.postback) {
             const payload = messaging.postback.payload;
             console.log(`Postback received: ${payload}`);
@@ -1738,7 +1752,13 @@ if (messaging.message && (messaging.message.text || messaging.message.quick_repl
   const qrPayload = messaging.message.quick_reply?.payload;
   const userInput = messaging.message.text || qrPayload || '';
   const receivedText = userInput.toLowerCase().trim();
-  
+
+  // Skip auto-reply if admin has paused this conversation
+  if (pausedPages.has(pageId)) {
+    console.log(`⏸️ Skipping auto-reply — page ${pageId} is paused by admin`);
+    continue;
+  }
+
   // Get page config first
   const pageConfig = await getPageConfig(pageId);
   const keywordsSheetId = pageConfig?.keywordsSheetId;
@@ -2316,7 +2336,7 @@ app.get('/subscribe-feed', async (req, res) => {
         uri: subscribeUrl,
         qs: { 
           access_token: pageConfig.pageToken,
-          subscribed_fields: 'messages,messaging_postbacks,feed,messaging_handovers'
+          subscribed_fields: 'messages,messaging_postbacks,feed,messaging_handovers,message_echoes'
         }
       },
       (err, response, body) => {
