@@ -102,7 +102,7 @@ app.get('/health', async (req, res) => {
 // SMS INTEGRATION (Semaphore)
 // =======================
 
-async function sendSMS(phoneNumber, message) {
+async function sendSMS(phoneNumber, message, senderName = null) {
   try {
     const https = require('https');
     const querystring = require('querystring');
@@ -118,7 +118,7 @@ async function sendSMS(phoneNumber, message) {
       apikey: process.env.SEMAPHORE_API_KEY,
       number: phoneNumber,
       message: message,
-      sendername: process.env.SEMAPHORE_SENDER_NAME || 'KIARA'
+      sendername: senderName || process.env.SEMAPHORE_SENDER_NAME || 'KIARA'
     });
     
     return new Promise((resolve, reject) => {
@@ -963,6 +963,42 @@ async function getHotlines(sheetId, type = 'emergency') {
 }
 
 // =======================
+// LEAK REPORT SMS ALERT
+// =======================
+
+async function sendLeakReportSMSToTeam(data, pageId) {
+  try {
+    const pageConfig = await getPageConfig(pageId);
+    const sheetId = pageConfig?.keywordsSheetId;
+    if (!sheetId) { console.error('❌ No sheetId for leak SMS'); return; }
+
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId: sheetId,
+      range: 'Hotlines!C:C',
+    });
+    const phones = (res.data.values || []).slice(1).map(r => (r[0] || '').trim()).filter(n => n.length > 0);
+    if (!phones.length) { console.log('⚠️ No phones found in Hotlines column C'); return; }
+
+    const smsText =
+      `LEAK REPORT\n` +
+      `Name: ${data.name || 'N/A'}\n` +
+      `Contact: ${data.contact || 'N/A'}\n` +
+      `Location: ${data.location || 'N/A'}\n` +
+      `Started: ${data.started || 'N/A'}\n` +
+      `Size: ${data.size || 'N/A'}\n` +
+      `Area: ${data.area || 'N/A'}\n` +
+      `Flooding/Damage: ${data.damage || 'N/A'}`;
+
+    console.log(`📤 Sending leak alert SMS to ${phones.length} number(s)...`);
+    for (const phone of phones) {
+      await sendSMS(phone, smsText, 'BogoWD');
+    }
+  } catch (err) {
+    console.error('❌ Error sending leak report SMS:', err.message);
+  }
+}
+
+// =======================
 // SEND HELP/EMERGENCY ALERT
 // =======================
 
@@ -1725,6 +1761,7 @@ app.post('/webhook', async (req, res) => {
                   delete leakSessions[senderPsid];
                   sendTyping(senderPsid, pageToken);
                   setTimeout(() => callSendAPI(senderPsid, summary, pageToken), 1000);
+                  sendLeakReportSMSToTeam(d, pageId);
                 }
               }
               continue;
@@ -2105,6 +2142,7 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
       delete leakSessions[senderPsid];
       sendTyping(senderPsid, pageToken);
       setTimeout(() => callSendAPI(senderPsid, summary, pageToken), 1000);
+      sendLeakReportSMSToTeam(d, pageId);
     }
     continue;
   }
