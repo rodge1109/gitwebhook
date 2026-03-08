@@ -2065,7 +2065,7 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
   // ==========================================
   // BILL INQUIRY TRIGGER
   // ==========================================
-  if (receivedText === 'bill') {
+  if (receivedText === 'bill' || receivedText === 'latest bill' || receivedText === 'view billing') {
     billSessions[senderPsid] = true;
     sendTyping(senderPsid, pageToken);
     setTimeout(() => {
