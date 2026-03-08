@@ -14,6 +14,18 @@ const pausedPages = new Set();
 const keywordMissCounters = {};
 const greetedUsers = {};
 const billSessions = {};
+const leakSessions = {};
+
+const LEAK_QUESTIONS = [
+  { key: 'name',      label: 'Name',                        ask: 'What is your name?',                                   type: 'text' },
+  { key: 'contact',   label: 'Contact Number',               ask: 'What is your contact number?',                         type: 'contact' },
+  { key: 'location',  label: 'Exact Location of Leak',       ask: 'What is the exact location of the leak?',              type: 'text' },
+  { key: 'started',   label: 'When did the leak start?',     ask: 'When did the leak start?',                             type: 'text' },
+  { key: 'size',      label: 'Size of Leak',                 ask: 'How would you describe the size of the leak?',         type: 'buttons', options: ['Small', 'Moderate', 'Large'] },
+  { key: 'area',      label: 'Location Type',                ask: 'Where is the leak located?',                           type: 'buttons', options: ['Inside Property', 'Street Line'] },
+  { key: 'damage',    label: 'Causing Flooding/Damage?',     ask: 'Is it causing flooding or damage?',                    type: 'buttons', options: ['Yes', 'No'] },
+  { key: 'photo',     label: 'Photo',                        ask: 'Can you send a photo of the leak? (or type "skip")',   type: 'photo' },
+];
 
 // Clean up greeted users older than 24 hours
 setInterval(() => {
@@ -1671,6 +1683,51 @@ app.post('/webhook', async (req, res) => {
                 }, 1000);
               }
               continue;
+            } else if (payload.startsWith('LEAK_ANS_')) {
+              // Handle leak report button answers
+              if (leakSessions[senderPsid]) {
+                const session = leakSessions[senderPsid];
+                const q = LEAK_QUESTIONS[session.step];
+                const answer = payload.replace('LEAK_ANS_', '').replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+                session.data[q.key] = answer;
+                session.step++;
+
+                if (session.step < LEAK_QUESTIONS.length) {
+                  const next = LEAK_QUESTIONS[session.step];
+                  sendTyping(senderPsid, pageToken);
+                  setTimeout(() => {
+                    if (next.type === 'buttons') {
+                      callSendAPI(senderPsid, null, pageToken, null, {
+                        type: 'template',
+                        payload: {
+                          template_type: 'button',
+                          text: next.ask,
+                          buttons: next.options.map(o => ({ type: 'postback', title: o, payload: `LEAK_ANS_${o.toUpperCase().replace(/\s+/g, '_')}` }))
+                        }
+                      });
+                    } else {
+                      callSendAPI(senderPsid, next.ask, pageToken);
+                    }
+                  }, 1000);
+                } else {
+                  const d = session.data;
+                  const summary =
+                    `✅ LEAK REPORT RECEIVED\n\n` +
+                    `Name: ${d.name || 'N/A'}\n` +
+                    `Contact: ${d.contact || 'N/A'}\n` +
+                    `Location: ${d.location || 'N/A'}\n` +
+                    `Started: ${d.started || 'N/A'}\n` +
+                    `Size: ${d.size || 'N/A'}\n` +
+                    `Area: ${d.area || 'N/A'}\n` +
+                    `Flooding/Damage: ${d.damage || 'N/A'}\n` +
+                    `Photo: ${d.photo || 'No photo provided'}\n\n` +
+                    `Thank you! Our team has been notified and will respond shortly.`;
+                  delete leakSessions[senderPsid];
+                  sendTyping(senderPsid, pageToken);
+                  setTimeout(() => callSendAPI(senderPsid, summary, pageToken), 1000);
+                }
+              }
+              continue;
             } else if (payload === 'HELP_SHARE_LOCATION') {
               // Handle help location request
               console.log(`📍 User clicked location button for help request`);
@@ -1982,6 +2039,77 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
   }
 
   // ==========================================
+  // HANDLE LEAK REPORT SESSION
+  // ==========================================
+  if (leakSessions[senderPsid]) {
+    const session = leakSessions[senderPsid];
+    const q = LEAK_QUESTIONS[session.step];
+
+    // Capture answer
+    if (q.type === 'photo') {
+      // Accept image attachment or skip
+      const attachments = messaging.message?.attachments || [];
+      const photo = attachments.find(a => a.type === 'image');
+      if (photo) {
+        session.data.photo = photo.payload.url;
+      } else {
+        session.data.photo = userInput.toLowerCase().includes('skip') ? 'No photo provided' : userInput;
+      }
+    } else if (q.type === 'contact') {
+      const validation = validateMobileNumber(userInput);
+      if (!validation.valid) {
+        sendTyping(senderPsid, pageToken);
+        setTimeout(() => callSendAPI(senderPsid, 'Invalid number. Please enter 11 digits starting with 09 (e.g. 09123456789):', pageToken), 1000);
+        continue;
+      }
+      session.data[q.key] = validation.formatted;
+    } else {
+      session.data[q.key] = userInput.trim();
+    }
+
+    session.step++;
+
+    // Ask next question or finish
+    if (session.step < LEAK_QUESTIONS.length) {
+      const next = LEAK_QUESTIONS[session.step];
+      sendTyping(senderPsid, pageToken);
+      setTimeout(() => {
+        if (next.type === 'buttons') {
+          callSendAPI(senderPsid, null, pageToken, null, {
+            type: 'template',
+            payload: {
+              template_type: 'button',
+              text: next.ask,
+              buttons: next.options.map(o => ({ type: 'postback', title: o, payload: `LEAK_ANS_${o.toUpperCase().replace(/\s+/g, '_')}` }))
+            }
+          });
+        } else {
+          callSendAPI(senderPsid, next.ask, pageToken);
+        }
+      }, 1000);
+    } else {
+      // All questions done — build summary
+      const d = session.data;
+      const summary =
+        `✅ LEAK REPORT RECEIVED\n\n` +
+        `Name: ${d.name || 'N/A'}\n` +
+        `Contact: ${d.contact || 'N/A'}\n` +
+        `Location: ${d.location || 'N/A'}\n` +
+        `Started: ${d.started || 'N/A'}\n` +
+        `Size: ${d.size || 'N/A'}\n` +
+        `Area: ${d.area || 'N/A'}\n` +
+        `Flooding/Damage: ${d.damage || 'N/A'}\n` +
+        `Photo: ${d.photo || 'No photo provided'}\n\n` +
+        `Thank you! Our team has been notified and will respond shortly.`;
+
+      delete leakSessions[senderPsid];
+      sendTyping(senderPsid, pageToken);
+      setTimeout(() => callSendAPI(senderPsid, summary, pageToken), 1000);
+    }
+    continue;
+  }
+
+  // ==========================================
   // HANDLE BILL INQUIRY SESSION (waiting for conscode)
   // ==========================================
   if (billSessions[senderPsid]) {
@@ -2070,6 +2198,19 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
     sendTyping(senderPsid, pageToken);
     setTimeout(() => {
       callSendAPI(senderPsid, 'Please enter your Conscode to check your bill:', pageToken);
+    }, 1000);
+    continue;
+  }
+
+  // ==========================================
+  // LEAK REPORT TRIGGER
+  // ==========================================
+  if (receivedText.includes('report a leak') || receivedText.includes('report leak') || receivedText === 'leak') {
+    leakSessions[senderPsid] = { step: 0, data: {} };
+    const first = LEAK_QUESTIONS[0];
+    sendTyping(senderPsid, pageToken);
+    setTimeout(() => {
+      callSendAPI(senderPsid, `We'll help you report this leak. Please answer a few quick questions.\n\n${first.ask}`, pageToken);
     }, 1000);
     continue;
   }
