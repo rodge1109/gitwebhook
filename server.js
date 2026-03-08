@@ -10,6 +10,7 @@ const app = express();
 app.use(bodyParser.json());
 
 const pendingHelpRequests = new Set();
+const pausedPages = new Set();
 const keywordMissCounters = {};
 const greetedUsers = {};
 const billSessions = {};
@@ -1106,6 +1107,36 @@ function sendTyping(senderPsid, pageToken) {
   );
 }
 
+function parseCarousel(columnC) {
+  const raw = columnC.slice('CAROUSEL::'.length);
+  const btnPattern = /^\[([^\]]+)\](?:\(([^)]+)\))?$/;
+  const elements = raw.split(';;').map(cardStr => {
+    const fields = cardStr.split('|').map(f => f.trim());
+    const element = { title: 'Untitled' };
+    const buttons = [];
+    fields.forEach((field, idx) => {
+      if (idx === 0) {
+        element.title = field || 'Untitled';
+      } else if (btnPattern.test(field)) {
+        const m = field.match(btnPattern);
+        const title = m[1].trim();
+        const url = m[2] ? m[2].trim() : null;
+        buttons.push(url
+          ? { type: 'web_url', title, url }
+          : { type: 'postback', title, payload: `CAROUSEL_${title.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}` }
+        );
+      } else if (field.startsWith('http://') || field.startsWith('https://')) {
+        element.image_url = field;
+      } else if (field) {
+        element.subtitle = field;
+      }
+    });
+    if (buttons.length) element.buttons = buttons.slice(0, 3);
+    return element;
+  }).filter(e => e.title);
+  return elements;
+}
+
 function callSendAPI(senderPsid, response, pageToken, quickReplies = null, template = null, imageUrl = null, fileUrl = null) {
   let messageData = {
     recipient: { id: senderPsid }
@@ -1563,6 +1594,19 @@ app.post('/webhook', async (req, res) => {
           }
           console.log('');
 
+          // Handle admin echo commands (!pause / !resume)
+          if (messaging.message && messaging.message.is_echo) {
+            const echoText = (messaging.message.text || '').trim().toLowerCase();
+            if (echoText === '!pause') {
+              pausedPages.add(pageId);
+              console.log(`⏸️ Auto-reply PAUSED for all users on page ${pageId} by admin`);
+            } else if (echoText === '!resume') {
+              pausedPages.delete(pageId);
+              console.log(`▶️ Auto-reply RESUMED for all users on page ${pageId} by admin`);
+            }
+            continue; // Never process admin echoes as user messages
+          }
+
           if (messaging.postback) {
             const payload = messaging.postback.payload;
             console.log(`Postback received: ${payload}`);
@@ -1738,7 +1782,13 @@ if (messaging.message && (messaging.message.text || messaging.message.quick_repl
   const qrPayload = messaging.message.quick_reply?.payload;
   const userInput = messaging.message.text || qrPayload || '';
   const receivedText = userInput.toLowerCase().trim();
-  
+
+  // Skip auto-reply if admin has paused this conversation
+  if (pausedPages.has(pageId)) {
+    console.log(`⏸️ Skipping auto-reply — page ${pageId} is paused by admin`);
+    continue;
+  }
+
   // Get page config first
   const pageConfig = await getPageConfig(pageId);
   const keywordsSheetId = pageConfig?.keywordsSheetId;
@@ -2058,6 +2108,7 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
   let secondaryText = null;
   let imageUrls = [];
   let fileUrls = [];
+  let carouselTemplate = null;
 
   // Track keyword misses per user
   if (!match) {
@@ -2099,12 +2150,20 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
       reply = responses[Math.floor(Math.random() * responses.length)];
     }
 
-    // Handle column C extras: action, text, or image URLs
+    // Handle column C extras: carousel, action, text, or image URLs
     if (column_c) {
       const isUrlLike = (text) =>
         text.startsWith('http://') || text.startsWith('https://') || text.includes('drive.google.com');
 
-      if (isUrlLike(column_c)) {
+      if (column_c.startsWith('CAROUSEL::')) {
+        const elements = parseCarousel(column_c);
+        if (elements.length) {
+          carouselTemplate = {
+            type: 'template',
+            payload: { template_type: 'generic', elements: elements.slice(0, 10) }
+          };
+        }
+      } else if (isUrlLike(column_c)) {
         const allUrls = column_c.split('|').map(url => url.trim()).filter(url => url.length > 0);
         allUrls.forEach(url => {
           const lowerUrl = url.toLowerCase();
@@ -2178,6 +2237,9 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
       }
     });
     sendSecondary();
+    if (carouselTemplate) {
+      callSendAPI(senderPsid, null, pageToken, null, carouselTemplate);
+    }
     if (imageUrls.length > 0) {
       imageUrls.forEach(url => {
         callSendAPI(senderPsid, null, pageToken, null, null, url);
@@ -2197,6 +2259,9 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
 
     sendSecondary();
 
+    if (carouselTemplate) {
+      callSendAPI(senderPsid, null, pageToken, null, carouselTemplate);
+    }
     if (imageUrls.length > 0) {
       imageUrls.forEach(url => {
         callSendAPI(senderPsid, null, pageToken, null, null, url);
@@ -2316,7 +2381,7 @@ app.get('/subscribe-feed', async (req, res) => {
         uri: subscribeUrl,
         qs: { 
           access_token: pageConfig.pageToken,
-          subscribed_fields: 'messages,messaging_postbacks,feed,messaging_handovers'
+          subscribed_fields: 'messages,messaging_postbacks,feed,messaging_handovers,message_echoes'
         }
       },
       (err, response, body) => {
