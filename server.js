@@ -942,20 +942,20 @@ async function getHotlines(sheetId, type = 'emergency') {
       spreadsheetId: sheetId,
       range: 'Hotlines!A:C',
     });
-    
+
     const rows = res.data.values || [];
-    
+
     if (rows.length <= 1) {
       console.log('❌ No hotlines found in sheet');
       return [];
     }
-    
-    // Filter by type and return phone numbers
+
+    // Filter by type (pass null to get all entries)
     const hotlines = [];
     for (let i = 1; i < rows.length; i++) {
       const [hotlineType, name, phoneNumber] = rows[i];
-      
-      if (hotlineType && hotlineType.toLowerCase() === type.toLowerCase() && phoneNumber) {
+
+      if (phoneNumber && (type === null || (hotlineType && hotlineType.toLowerCase() === type.toLowerCase()))) {
         hotlines.push({
           type: hotlineType,
           name: name || 'Hotline',
@@ -974,6 +974,47 @@ async function getHotlines(sheetId, type = 'emergency') {
 }
 
 // =======================
+// LEAK REPORT HELPERS
+// =======================
+
+function askLeakQuestion(senderPsid, next, pageToken) {
+  sendTyping(senderPsid, pageToken);
+  setTimeout(() => {
+    if (next.type === 'buttons') {
+      callSendAPI(senderPsid, null, pageToken, null, {
+        type: 'template',
+        payload: {
+          template_type: 'button',
+          text: next.ask,
+          buttons: next.options.map(o => ({ type: 'postback', title: o, payload: `LEAK_ANS_${o.toUpperCase().replace(/\s+/g, '_')}` }))
+        }
+      });
+    } else {
+      callSendAPI(senderPsid, next.ask, pageToken);
+    }
+  }, 1000);
+}
+
+function finishLeakReport(session, senderPsid, pageToken, pageId) {
+  const d = session.data;
+  const summary =
+    `✅ LEAK REPORT RECEIVED\n\n` +
+    `Name: ${d.name || 'N/A'}\n` +
+    `Contact: ${d.contact || 'N/A'}\n` +
+    `Location: ${d.location || 'N/A'}\n` +
+    `Started: ${d.started || 'N/A'}\n` +
+    `Size: ${d.size || 'N/A'}\n` +
+    `Area: ${d.area || 'N/A'}\n` +
+    `Flooding/Damage: ${d.damage || 'N/A'}\n` +
+    `Photo: ${d.photo || 'No photo provided'}\n\n` +
+    `Thank you! Our team has been notified and will respond shortly.`;
+  delete leakSessions[senderPsid];
+  sendTyping(senderPsid, pageToken);
+  setTimeout(() => callSendAPI(senderPsid, summary, pageToken), 1000);
+  sendLeakReportSMSToTeam(d, pageId);
+}
+
+// =======================
 // LEAK REPORT SMS ALERT
 // =======================
 
@@ -983,13 +1024,13 @@ async function sendLeakReportSMSToTeam(data, pageId) {
     const sheetId = pageConfig?.keywordsSheetId;
     if (!sheetId) { console.error('❌ No sheetId for leak SMS'); return; }
 
-    // Fetch hotline phones and sender name config in parallel
-    const [hotlineRes, configRes] = await Promise.all([
-      sheets.spreadsheets.values.get({ spreadsheetId: sheetId, range: 'Hotlines!C:C' }),
+    // Fetch all hotline phones and sender name config in parallel
+    const [hotlines, configRes] = await Promise.all([
+      getHotlines(sheetId, null),
       sheets.spreadsheets.values.get({ spreadsheetId: '1Qk55w8gG6o5TUlEKtBpvx-JTwxoHr1lqB_l0AswXzi0', range: 'A:I' }),
     ]);
 
-    const phones = (hotlineRes.data.values || []).slice(1).map(r => (r[0] || '').trim()).filter(n => n.length > 0);
+    const phones = hotlines.map(h => h.phoneNumber);
     if (!phones.length) { console.log('⚠️ No phones found in Hotlines column C'); return; }
 
     const configRow = (configRes.data.values || []).find(r => r[0] === pageId);
@@ -1746,39 +1787,9 @@ app.post('/webhook', async (req, res) => {
                 session.step++;
 
                 if (session.step < LEAK_QUESTIONS.length) {
-                  const next = LEAK_QUESTIONS[session.step];
-                  sendTyping(senderPsid, pageToken);
-                  setTimeout(() => {
-                    if (next.type === 'buttons') {
-                      callSendAPI(senderPsid, null, pageToken, null, {
-                        type: 'template',
-                        payload: {
-                          template_type: 'button',
-                          text: next.ask,
-                          buttons: next.options.map(o => ({ type: 'postback', title: o, payload: `LEAK_ANS_${o.toUpperCase().replace(/\s+/g, '_')}` }))
-                        }
-                      });
-                    } else {
-                      callSendAPI(senderPsid, next.ask, pageToken);
-                    }
-                  }, 1000);
+                  askLeakQuestion(senderPsid, LEAK_QUESTIONS[session.step], pageToken);
                 } else {
-                  const d = session.data;
-                  const summary =
-                    `✅ LEAK REPORT RECEIVED\n\n` +
-                    `Name: ${d.name || 'N/A'}\n` +
-                    `Contact: ${d.contact || 'N/A'}\n` +
-                    `Location: ${d.location || 'N/A'}\n` +
-                    `Started: ${d.started || 'N/A'}\n` +
-                    `Size: ${d.size || 'N/A'}\n` +
-                    `Area: ${d.area || 'N/A'}\n` +
-                    `Flooding/Damage: ${d.damage || 'N/A'}\n` +
-                    `Photo: ${d.photo || 'No photo provided'}\n\n` +
-                    `Thank you! Our team has been notified and will respond shortly.`;
-                  delete leakSessions[senderPsid];
-                  sendTyping(senderPsid, pageToken);
-                  setTimeout(() => callSendAPI(senderPsid, summary, pageToken), 1000);
-                  sendLeakReportSMSToTeam(d, pageId);
+                  finishLeakReport(session, senderPsid, pageToken, pageId);
                 }
               }
               continue;
@@ -2125,41 +2136,9 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
 
     // Ask next question or finish
     if (session.step < LEAK_QUESTIONS.length) {
-      const next = LEAK_QUESTIONS[session.step];
-      sendTyping(senderPsid, pageToken);
-      setTimeout(() => {
-        if (next.type === 'buttons') {
-          callSendAPI(senderPsid, null, pageToken, null, {
-            type: 'template',
-            payload: {
-              template_type: 'button',
-              text: next.ask,
-              buttons: next.options.map(o => ({ type: 'postback', title: o, payload: `LEAK_ANS_${o.toUpperCase().replace(/\s+/g, '_')}` }))
-            }
-          });
-        } else {
-          callSendAPI(senderPsid, next.ask, pageToken);
-        }
-      }, 1000);
+      askLeakQuestion(senderPsid, LEAK_QUESTIONS[session.step], pageToken);
     } else {
-      // All questions done — build summary
-      const d = session.data;
-      const summary =
-        `✅ LEAK REPORT RECEIVED\n\n` +
-        `Name: ${d.name || 'N/A'}\n` +
-        `Contact: ${d.contact || 'N/A'}\n` +
-        `Location: ${d.location || 'N/A'}\n` +
-        `Started: ${d.started || 'N/A'}\n` +
-        `Size: ${d.size || 'N/A'}\n` +
-        `Area: ${d.area || 'N/A'}\n` +
-        `Flooding/Damage: ${d.damage || 'N/A'}\n` +
-        `Photo: ${d.photo || 'No photo provided'}\n\n` +
-        `Thank you! Our team has been notified and will respond shortly.`;
-
-      delete leakSessions[senderPsid];
-      sendTyping(senderPsid, pageToken);
-      setTimeout(() => callSendAPI(senderPsid, summary, pageToken), 1000);
-      sendLeakReportSMSToTeam(d, pageId);
+      finishLeakReport(session, senderPsid, pageToken, pageId);
     }
     continue;
   }
