@@ -724,7 +724,7 @@ async function getKeywords(sheetId, forceRefresh = false) {
     try {
       const res = await sheets.spreadsheets.values.get({
         spreadsheetId: sheetId,
-        range: 'KeywordsDM!A:C',
+        range: 'KeywordsDM!A:D',
       });
       keywordsCache[sheetId] = res.data.values || [];
       console.log(`Keywords refreshed for sheet ${sheetId} (${keywordsCache[sheetId].length} keywords loaded)`);
@@ -2294,10 +2294,6 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
   });
 
   let reply = "Hi! I want to make sure I help you correctly. Could you please clarify your question?";
-  let secondaryText = null;
-  let imageUrls = [];
-  let fileUrls = [];
-  let carouselTemplate = null;
 
   // Track keyword misses per user
   if (!match) {
@@ -2329,50 +2325,51 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
     keywordMissCounters[senderPsid] = 0;
   }
 
-  if (match) {
-    const column_c = match[2] ? match[2].trim() : null;
-    console.log('Column C value:', column_c);
+  // Helper: parse a column value into sendable parts
+  const isUrlLike = (text) =>
+    text.startsWith('http://') || text.startsWith('https://') || text.includes('drive.google.com');
 
-    // Primary reply from column B (if present)
+  const parseColumnContent = async (value) => {
+    const result = { imageUrls: [], fileUrls: [], carouselTemplate: null, secondaryText: null };
+    if (!value) return result;
+    if (value.startsWith('CAROUSEL::')) {
+      const elements = parseCarousel(value);
+      if (elements.length) result.carouselTemplate = { type: 'template', payload: { template_type: 'generic', elements: elements.slice(0, 10) } };
+    } else if (isUrlLike(value)) {
+      value.split('|').map(u => u.trim()).filter(Boolean).forEach(url => {
+        const lower = url.toLowerCase();
+        if (lower.endsWith('.pdf') || lower.endsWith('.doc') || lower.endsWith('.docx') || lower.endsWith('.xls') || lower.endsWith('.xlsx') || lower.includes('export=download')) {
+          result.fileUrls.push(url);
+        } else {
+          result.imageUrls.push(url);
+        }
+      });
+    } else {
+      const actionResult = await executeSpecialAction(value.toLowerCase(), senderPsid, pageToken);
+      if (actionResult) result.secondaryText = actionResult;
+      else result.secondaryText = value;
+    }
+    return result;
+  };
+
+  let colC = { imageUrls: [], fileUrls: [], carouselTemplate: null, secondaryText: null };
+  let colD = { imageUrls: [], fileUrls: [], carouselTemplate: null, secondaryText: null };
+
+  if (match) {
+    // Column B — primary reply text
     if (match[1]) {
       const responses = match[1].split('|').map(r => r.trim());
       reply = responses[Math.floor(Math.random() * responses.length)];
     }
-
-    // Handle column C extras: carousel, action, text, or image URLs
-    if (column_c) {
-      const isUrlLike = (text) =>
-        text.startsWith('http://') || text.startsWith('https://') || text.includes('drive.google.com');
-
-      if (column_c.startsWith('CAROUSEL::')) {
-        const elements = parseCarousel(column_c);
-        if (elements.length) {
-          carouselTemplate = {
-            type: 'template',
-            payload: { template_type: 'generic', elements: elements.slice(0, 10) }
-          };
-        }
-      } else if (isUrlLike(column_c)) {
-        const allUrls = column_c.split('|').map(url => url.trim()).filter(url => url.length > 0);
-        allUrls.forEach(url => {
-          const lowerUrl = url.toLowerCase();
-          if (lowerUrl.endsWith('.pdf') || lowerUrl.endsWith('.doc') || lowerUrl.endsWith('.docx') || lowerUrl.endsWith('.xls') || lowerUrl.endsWith('.xlsx') || lowerUrl.includes('export=download')) {
-            fileUrls.push(url);
-          } else {
-            imageUrls.push(url);
-          }
-        });
-        console.log('Image URLs detected:', imageUrls);
-        console.log('File URLs detected:', fileUrls);
-      } else {
-        // Try special action first; if no action result, treat as secondary text
-        const actionResult = await executeSpecialAction(column_c.toLowerCase(), senderPsid, pageToken);
-        if (actionResult) {
-          reply = actionResult;
-        } else {
-          secondaryText = column_c;
-        }
-      }
+    // Column C
+    if (match[2]) {
+      console.log('Column C value:', match[2].trim());
+      colC = await parseColumnContent(match[2].trim());
+    }
+    // Column D
+    if (match[3]) {
+      console.log('Column D value:', match[3].trim());
+      colD = await parseColumnContent(match[3].trim());
     }
   }
 
@@ -2391,77 +2388,47 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
     return { type: "postback", title, payload: `BTN_${title.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_${idx}` };
   };
 
-  const sendSecondary = () => {
-    if (!secondaryText) return;
-    const secMatches = [...secondaryText.matchAll(buttonPattern)];
-    if (secMatches.length) {
-      const secButtons = secMatches.slice(0, 3).map((m, idx) => makeButton(m, idx));
-      const cleanSecondary = secondaryText.replace(buttonPattern, '').replace(/\s+/g, ' ').trim()
-        || 'Please choose an option:';
-      callSendAPI(senderPsid, null, pageToken, null, {
-        type: "template",
-        payload: {
-          template_type: "button",
-          text: cleanSecondary,
-          buttons: secButtons
-        }
-      });
-    } else {
-      callSendAPI(senderPsid, secondaryText, pageToken);
+  // Helper: send all parts of a parsed column (text/images/files/carousel)
+  const sendColParts = (col) => {
+    if (!col) return;
+    if (col.secondaryText) {
+      const secMatches = [...col.secondaryText.matchAll(buttonPattern)];
+      if (secMatches.length) {
+        const secButtons = secMatches.slice(0, 3).map((m, idx) => makeButton(m, idx));
+        const cleanText = col.secondaryText.replace(buttonPattern, '').replace(/\s+/g, ' ').trim() || 'Please choose an option:';
+        callSendAPI(senderPsid, null, pageToken, null, { type: 'template', payload: { template_type: 'button', text: cleanText, buttons: secButtons } });
+      } else {
+        callSendAPI(senderPsid, col.secondaryText, pageToken);
+      }
     }
+    if (col.carouselTemplate) callSendAPI(senderPsid, null, pageToken, null, col.carouselTemplate);
+    col.imageUrls.forEach(url => callSendAPI(senderPsid, null, pageToken, null, null, url));
+    col.fileUrls.forEach(url => callSendAPI(senderPsid, null, pageToken, null, null, null, url));
   };
 
-  if (buttonMatches.length && imageUrls.length === 0) {
-    const buttons = buttonMatches.slice(0, 3).map((m, idx) => makeButton(m, idx));
-
-    const cleanText = reply.replace(buttonPattern, '').replace(/\s+/g, ' ').trim()
-      || 'Please choose an option:';
-
-    callSendAPI(senderPsid, null, pageToken, null, {
-      type: "template",
-      payload: {
-        template_type: "button",
-        text: cleanText,
-        buttons
-      }
-    });
-    sendSecondary();
-    if (carouselTemplate) {
-      callSendAPI(senderPsid, null, pageToken, null, carouselTemplate);
-    }
-    if (imageUrls.length > 0) {
-      imageUrls.forEach(url => {
-        callSendAPI(senderPsid, null, pageToken, null, null, url);
-      });
-    }
-    if (fileUrls.length > 0) {
-      fileUrls.forEach(url => {
-        callSendAPI(senderPsid, null, pageToken, null, null, null, url);
-      });
-    }
-    continue;
-  }
-
+  // Column B — send first
   sendTyping(senderPsid, pageToken);
   setTimeout(() => {
-    callSendAPI(senderPsid, reply, pageToken);
-
-    sendSecondary();
-
-    if (carouselTemplate) {
-      callSendAPI(senderPsid, null, pageToken, null, carouselTemplate);
-    }
-    if (imageUrls.length > 0) {
-      imageUrls.forEach(url => {
-        callSendAPI(senderPsid, null, pageToken, null, null, url);
-      });
-    }
-    if (fileUrls.length > 0) {
-      fileUrls.forEach(url => {
-        callSendAPI(senderPsid, null, pageToken, null, null, null, url);
-      });
+    if (buttonMatches.length && colC.imageUrls.length === 0) {
+      const buttons = buttonMatches.slice(0, 3).map((m, idx) => makeButton(m, idx));
+      const cleanText = reply.replace(buttonPattern, '').replace(/\s+/g, ' ').trim() || 'Please choose an option:';
+      callSendAPI(senderPsid, null, pageToken, null, { type: 'template', payload: { template_type: 'button', text: cleanText, buttons } });
+    } else {
+      callSendAPI(senderPsid, reply, pageToken);
     }
   }, 1500);
+
+  // Column C — send after B
+  const hasColC = colC.secondaryText || colC.carouselTemplate || colC.imageUrls.length || colC.fileUrls.length;
+  if (hasColC) {
+    setTimeout(() => sendColParts(colC), 2500);
+  }
+
+  // Column D — send after C
+  const hasColD = colD.secondaryText || colD.carouselTemplate || colD.imageUrls.length || colD.fileUrls.length;
+  if (hasColD) {
+    setTimeout(() => sendColParts(colD), 3500);
+  }
 }
               }
       }
