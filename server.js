@@ -38,6 +38,17 @@ setInterval(() => {
   });
 }, 60 * 60 * 1000);
 
+// Clean up stale leak sessions older than 30 minutes
+setInterval(() => {
+  const thirtyMinAgo = Date.now() - (30 * 60 * 1000);
+  Object.keys(leakSessions).forEach(psid => {
+    if (leakSessions[psid].startedAt < thirtyMinAgo) {
+      delete leakSessions[psid];
+      console.log(`🧹 Stale leak session cleared for ${psid}`);
+    }
+  });
+}, 10 * 60 * 1000);
+
 
 /* =======================
    GOOGLE SHEETS SETUP
@@ -972,12 +983,18 @@ async function sendLeakReportSMSToTeam(data, pageId) {
     const sheetId = pageConfig?.keywordsSheetId;
     if (!sheetId) { console.error('❌ No sheetId for leak SMS'); return; }
 
-    const res = await sheets.spreadsheets.values.get({
-      spreadsheetId: sheetId,
-      range: 'Hotlines!C:C',
-    });
-    const phones = (res.data.values || []).slice(1).map(r => (r[0] || '').trim()).filter(n => n.length > 0);
+    // Fetch hotline phones and sender name config in parallel
+    const [hotlineRes, configRes] = await Promise.all([
+      sheets.spreadsheets.values.get({ spreadsheetId: sheetId, range: 'Hotlines!C:C' }),
+      sheets.spreadsheets.values.get({ spreadsheetId: '1Qk55w8gG6o5TUlEKtBpvx-JTwxoHr1lqB_l0AswXzi0', range: 'A:I' }),
+    ]);
+
+    const phones = (hotlineRes.data.values || []).slice(1).map(r => (r[0] || '').trim()).filter(n => n.length > 0);
     if (!phones.length) { console.log('⚠️ No phones found in Hotlines column C'); return; }
+
+    const configRow = (configRes.data.values || []).find(r => r[0] === pageId);
+    const senderName = (configRow && configRow[8]) ? configRow[8].trim() : 'BogoWD';
+    console.log(`📛 SMS sender name: "${senderName}"`);
 
     const smsText =
       `LEAK REPORT\n` +
@@ -988,16 +1005,6 @@ async function sendLeakReportSMSToTeam(data, pageId) {
       `Size: ${data.size || 'N/A'}\n` +
       `Area: ${data.area || 'N/A'}\n` +
       `Flooding/Damage: ${data.damage || 'N/A'}`;
-
-    // Get sender name from config sheet (column A = Page ID, column I = Sender Name)
-    const configRes = await sheets.spreadsheets.values.get({
-      spreadsheetId: '1Qk55w8gG6o5TUlEKtBpvx-JTwxoHr1lqB_l0AswXzi0',
-      range: 'A:I',
-    });
-    const configRows = configRes.data.values || [];
-    const configRow = configRows.find(r => r[0] === pageId);
-    const senderName = (configRow && configRow[8]) ? configRow[8].trim() : 'BogoWD';
-    console.log(`📛 SMS sender name: "${senderName}"`);
 
     console.log(`📤 Sending leak alert SMS to ${phones.length} number(s)...`);
     for (const phone of phones) {
@@ -2254,7 +2261,7 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
   // LEAK REPORT TRIGGER
   // ==========================================
   if (receivedText.includes('report a leak') || receivedText.includes('report leak') || receivedText === 'leak') {
-    leakSessions[senderPsid] = { step: 0, data: {} };
+    leakSessions[senderPsid] = { step: 0, data: {}, startedAt: Date.now() };
     const first = LEAK_QUESTIONS[0];
     sendTyping(senderPsid, pageToken);
     setTimeout(() => {
