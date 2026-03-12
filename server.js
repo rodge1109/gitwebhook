@@ -296,37 +296,6 @@ setInterval(cleanupStaleSessions, 10 * 60 * 1000);
  * @param {string} psid - Page Scoped ID (User ID).
  * @param {Array<Array>} bookingConfig - Configuration array defining booking steps.
  */
-async function startBooking(psid, bookingConfig) {
-  bookingSessions[psid] = {
-    step: 0,
-    config: bookingConfig,
-    data: {},
-    startedAt: new Date()
-  };
-
-  return {
-    text: null,
-    template: {
-      type: "template",
-      payload: {
-        template_type: "button",
-        text: "Great! I'll help you with your booking.\n\nAre you ready to proceed?",
-        buttons: [
-          {
-            type: "postback",
-            title: "YES, Continue",
-            payload: "BOOKING_YES"
-          },
-          {
-            type: "postback",
-            title: "NO, Cancel",
-            payload: "BOOKING_NO"
-          }
-        ]
-      }
-    }
-  };
-}
 
 /**
  * Validates a mobile number (11 digits, starts with 09).
@@ -747,19 +716,6 @@ async function getKeywords(sheetId, forceRefresh = false) {
   return keywordsCache[sheetId];
 }
 
-async function getBookingConfig(sheetId) {
-  try {
-    const res = await sheets.spreadsheets.values.get({
-      spreadsheetId: sheetId,
-      range: 'BookingConfig!A:D',
-    });
-    const rows = res.data.values || [];
-    return rows.slice(1);
-  } catch (err) {
-    console.error(`Error fetching BookingConfig from sheet ${sheetId}:`, err);
-    return null;
-  }
-}
 
 async function logPSID(psid) {
   try {
@@ -2249,28 +2205,6 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
     continue;
   }
 
-  // Check for order or booking commands
-  if (receivedText.includes('order') || receivedText.includes('book')) {
-    const bookingConfig = await getBookingConfig(bookingSheetId);
-
-    if (bookingConfig && bookingConfig.length > 0) {
-      const bookingReply = await startBooking(senderPsid, bookingConfig);
-      sendTyping(senderPsid, pageToken);
-      setTimeout(() => {
-        if (bookingReply.template) {
-          callSendAPI(senderPsid, null, pageToken, null, bookingReply.template);
-        } else {
-          callSendAPI(senderPsid, bookingReply.text, pageToken);
-        }
-      }, 1500);
-    } else {
-      sendTyping(senderPsid, pageToken);
-      setTimeout(() => {
-        callSendAPI(senderPsid, "Sorry, booking is not available at the moment.", pageToken);
-      }, 1500);
-    }
-    continue;
-  }
 
   // Keyword matching logic
   const match = keywords.find(row => {
