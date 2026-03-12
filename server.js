@@ -2279,7 +2279,7 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
     return keywordList.some(keyword => receivedText.includes(keyword));
   });
 
-  let reply = "Hi! I want to make sure I help you correctly. Could you please clarify your question?";
+  let reply = "Hi! I want to make sure I help you correctly. Could you please clarify your concern?";
 
   // Track keyword misses per user
   if (!match) {
@@ -2292,14 +2292,14 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
       const firstName = userInfo?.firstName && userInfo.firstName !== 'Unknown' ? userInfo.firstName : null;
       reply = firstName
         ? `Hi ${firstName}! I want to make sure I help you correctly. Could you please clarify your question?`
-        : `Hi! I want to make sure I help you correctly. Could you please clarify your question?`;
+        : `Hi! I want to make sure I help you correctly. Could you please clarify your concern?`;
     }
 
     if (keywordMissCounters[senderPsid] === 3) {
       // 3rd miss: send handoff message
       sendTyping(senderPsid, pageToken);
       setTimeout(() => {
-        callSendAPI(senderPsid, "It seems I can't help with that right now. Our admin will respond to you when available. Thank you for your patience!", pageToken);
+        callSendAPI(senderPsid, "Our admin will respond to you when available. Thank you for your patience!", pageToken);
       }, 1500);
       continue;
     } else if (keywordMissCounters[senderPsid] >= 2) {
