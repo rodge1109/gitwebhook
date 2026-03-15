@@ -5,6 +5,7 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const { google } = require('googleapis');
 const request = require('request');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 const app = express();
 app.use(bodyParser.json());
@@ -15,6 +16,74 @@ const keywordMissCounters = {};
 const greetedUsers = {};
 const billSessions = {};
 const leakSessions = {};
+
+// =======================
+// GEMINI (fallback handler)
+// =======================
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
+
+/**
+ * GEMINI PROMPT CONFIG
+ * Edit GEMINI_SYSTEM_PROMPT to change the bot's behavior/tone/rules.
+ * You can also override it without code changes by setting env var GEMINI_SYSTEM_PROMPT.
+ */
+const GEMINI_SYSTEM_PROMPT = (process.env.GEMINI_SYSTEM_PROMPT || `
+You are a helpful assistant for a Facebook Messenger bot of a local water district.
+
+STYLE:
+- Keep replies short and clear (1-4 sentences).
+- If you need more info, ask 1 question only.
+
+SCOPE:
+- Prioritize water district concerns: billing, leak reporting, service interruption, reconnection, requirements, office hours, and contact info.
+- If unrelated, politely redirect back to water services.
+
+SAFETY / ACCURACY:
+- Do not invent policies, prices, or dates.
+- If unsure, say you are not sure and suggest contacting the office/admin.
+`).trim();
+
+async function getGeminiReply(userText) {
+  try {
+    if (!process.env.GEMINI_API_KEY) return null;
+
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    const model = genAI.getGenerativeModel({
+      model: GEMINI_MODEL,
+      systemInstruction: GEMINI_SYSTEM_PROMPT
+    });
+
+    const result = await model.generateContent(userText);
+    const text = result?.response?.text?.();
+    const cleaned = (text || '').trim();
+    return cleaned.length ? cleaned : null;
+  } catch (err) {
+    console.error('❌ Gemini error:', err.message);
+    return null;
+  }
+}
+
+/**
+ * Build a Messenger "web_url" button template attachment.
+ * This renders a clickable button that opens a website (not a quick reply).
+ */
+function buildWebUrlButtonTemplate(text, title, url, webviewHeightRatio = 'full') {
+  return {
+    type: 'template',
+    payload: {
+      template_type: 'button',
+      text,
+      buttons: [
+        {
+          type: 'web_url',
+          title,
+          url,
+          webview_height_ratio: webviewHeightRatio,
+        },
+      ],
+    },
+  };
+}
 
 const LEAK_QUESTIONS = [
   { key: 'name',      label: 'Name',                        ask: 'What is your name?',                                   type: 'text' },
@@ -2230,11 +2299,40 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
     }
 
     if (keywordMissCounters[senderPsid] === 3) {
-      // 3rd miss: send handoff message
-      sendTyping(senderPsid, pageToken);
-      setTimeout(() => {
-        callSendAPI(senderPsid, "Our admin will respond to you when available. Thank you for your patience!", pageToken);
-      }, 1500);
+      // 3rd miss: let Gemini handle it (fallback to admin handoff if Gemini fails)
+      const aiReply = await getGeminiReply(userInput);
+
+      if (aiReply) {
+        sendTyping(senderPsid, pageToken);
+        setTimeout(() => {
+          callSendAPI(senderPsid, aiReply, pageToken);
+
+          // Optional: also send a clickable website button after the AI message.
+          // Configure these in your .env:
+          //   WEBSITE_URL=https://your-site.com
+          //   WEBSITE_BUTTON_TITLE=Open website
+          //   WEBSITE_BUTTON_TEXT=Continue on our website:
+          const websiteUrl = (process.env.WEBSITE_URL || '').trim();
+          if (websiteUrl) {
+            const buttonTitle = (process.env.WEBSITE_BUTTON_TITLE || 'Open website').trim();
+            const buttonText = (process.env.WEBSITE_BUTTON_TEXT || 'Continue on our website:').trim();
+
+            callSendAPI(
+              senderPsid,
+              null,
+              pageToken,
+              null,
+              buildWebUrlButtonTemplate(buttonText, buttonTitle, websiteUrl, 'full')
+            );
+          }
+        }, 1500);
+      } else {
+        sendTyping(senderPsid, pageToken);
+        setTimeout(() => {
+          callSendAPI(senderPsid, "Our admin will respond to you when available. Thank you for your patience!", pageToken);
+        }, 1500);
+      }
+
       continue;
     } else if (keywordMissCounters[senderPsid] >= 2) {
       // 2nd miss and 4+ misses: go silent, no reply at all
