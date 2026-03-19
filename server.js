@@ -2230,11 +2230,24 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
 
 
   // Keyword matching logic
-  const match = keywords.find(row => {
+  let match = keywords.find(row => {
     if (!row[0]) return false;
     const keywordList = row[0].toLowerCase().split(',').map(k => k.trim());
     return keywordList.some(keyword => receivedText.includes(keyword));
   });
+
+  // If no direct match found, look for a 'fallback' keyword row and use it
+  if (!match) {
+    const fallbackRow = keywords.find(row => {
+      if (!row[0]) return false;
+      const keywordList = row[0].toLowerCase().split(',').map(k => k.trim());
+      return keywordList.includes('fallback');
+    });
+    if (fallbackRow) {
+      match = fallbackRow;
+      console.log('🔁 Using fallback keyword response');
+    }
+  }
 
   let reply = "Hi! I want to make sure I help you correctly. Could you please clarify your concern?";
 
