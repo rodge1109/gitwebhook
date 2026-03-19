@@ -2203,31 +2203,6 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
     }
   }
 
-  // ==========================================
-  // BILL INQUIRY TRIGGER
-  // ==========================================
-  if (receivedText === 'bill' || receivedText === 'latest bill' || receivedText === 'view billing') {
-    billSessions[senderPsid] = true;
-    sendTyping(senderPsid, pageToken);
-    setTimeout(() => {
-      callSendAPI(senderPsid, 'Please enter your Conscode to check your bill:', pageToken);
-    }, 1000);
-    continue;
-  }
-
-  // ==========================================
-  // LEAK REPORT TRIGGER
-  // ==========================================
-  if (receivedText.includes('report a leak') || receivedText.includes('report leak') || receivedText === 'leak') {
-    leakSessions[senderPsid] = { step: 0, data: {}, startedAt: Date.now() };
-    const first = LEAK_QUESTIONS[0];
-    sendTyping(senderPsid, pageToken);
-    setTimeout(() => {
-      callSendAPI(senderPsid, `We'll help you report this leak. Please answer a few quick questions.\n\n${first.ask}`, pageToken);
-    }, 1000);
-    continue;
-  }
-
 
   // Keyword matching logic
   let match = keywords.find(row => {
