@@ -2581,10 +2581,77 @@ app.get('/check-bill-sheet', async (req, res) => {
 });
 
 // =======================
+// AUTO-SUBSCRIBE ALL PAGES ON STARTUP
+// =======================
+async function autoSubscribeAllPages() {
+  try {
+    console.log('\n🔄 Auto-subscribing all pages to feed events...\n');
+    
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId: process.env.SHEET_ID,
+      range: 'WebhookConfig!A:D',
+    });
+
+    const rows = res.data.values || [];
+    if (rows.length < 2) {
+      console.warn('⚠️  No pages configured in WebhookConfig sheet');
+      return;
+    }
+
+    let successCount = 0;
+    let failCount = 0;
+
+    // Skip header row, subscribe each page
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i];
+      const pageId = row[0];
+      const pageToken = row[1];
+
+      if (!pageId || !pageToken) {
+        console.warn(`⏭️  Skipping row ${i + 1}: Missing pageId or pageToken`);
+        continue;
+      }
+
+      try {
+        await new Promise((resolve, reject) => {
+          request.post(
+            {
+              uri: `https://graph.facebook.com/${process.env.GRAPH_API_VERSION || 'v23.0'}/${pageId}/subscribed_apps`,
+              qs: {
+                access_token: pageToken,
+                subscribed_fields: 'messages,messaging_postbacks,feed,messaging_handovers,message_echoes'
+              }
+            },
+            (err, response, body) => {
+              if (!err && response.statusCode === 200) {
+                console.log(`✅ Page ${pageId} subscribed to feed events`);
+                successCount++;
+                resolve();
+              } else {
+                console.error(`❌ Failed to subscribe page ${pageId}:`, err || body);
+                failCount++;
+                resolve(); // Don't reject, continue with next page
+              }
+            }
+          );
+        });
+      } catch (err) {
+        console.error(`❌ Error subscribing page ${pageId}:`, err.message);
+        failCount++;
+      }
+    }
+
+    console.log(`\n📊 Subscription Results: ${successCount} succeeded, ${failCount} failed\n`);
+  } catch (error) {
+    console.error('❌ Error in autoSubscribeAllPages:', error.message);
+  }
+}
+
+// =======================
 // SERVER START
 // =======================
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`\n${'='.repeat(80)}`);
   console.log(`✅ Server running on port ${PORT}`);
   console.log(`✅ Graph API: ${process.env.GRAPH_API_VERSION || 'v21.0'}`);
@@ -2596,4 +2663,7 @@ app.listen(PORT, () => {
   console.log(`   GET  /subscribe-feed       - Subscribe pages to feed`);
   console.log(`   GET  /check-subscriptions  - Check subscription status`);
   console.log(`${'='.repeat(80)}\n`);
+
+  // Auto-subscribe all pages to feed events
+  await autoSubscribeAllPages();
 });
