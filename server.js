@@ -1649,14 +1649,18 @@ app.get('/webhook', (req, res) => {
 app.post('/webhook', async (req, res) => {
   const body = req.body;
 
-  // Initialize the processedComments set
-  const processedComments = new Set();
-
   // Check for valid object type
   if (body.object === 'page') {
     for (const entry of body.entry) {
       const pageId = entry.id;
       const pageToken = await getPageToken(pageId);
+      
+      if (!pageToken) {
+        console.error(`❌ No token retrieved for page ${pageId}`);
+        continue;
+      }
+      
+      console.log(`✅ Token retrieved for page ${pageId} (length: ${pageToken.length})`);
 
       // Handle Messenger messages and postbacks
       if (entry.messaging) {
@@ -2368,12 +2372,19 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
       // Handle Facebook Post Comments
       // ==========================================
       if (entry.changes) {
+        console.log(`🔄 Processing ${entry.changes.length} change(s) for page ${pageId}`);
         for (const change of entry.changes) {
           console.log('📝 Change detected:', change.field);
+          
+          if (change.field !== 'feed') {
+            console.log(`   ⏭️  Skipping non-feed change: ${change.field}`);
+            continue;
+          }
 
           // Handle feed comments
           if (change.field === 'feed' && change.value) {
             const value = change.value;
+            console.log(`📋 Feed change value:`, JSON.stringify(value, null, 2));
             
             // Check if this is a comment
             if (value.item === 'comment' && value.comment_id) {
@@ -2432,10 +2443,12 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
 
               // Send private reply to comment
               try {
+                console.log(`📤 Attempting to reply to comment ${commentId} with: "${reply}"`);
                 await replyToComment(commentId, reply, pageToken);
                 console.log(`✅ Replied to comment ${commentId}`);
               } catch (error) {
-                console.error(`❌ Failed to reply to comment ${commentId}:`, error);
+                console.error(`❌ Failed to reply to comment ${commentId}:`, error.message || error);
+                console.error(`   Full error:`, error);
               }
             }
           }
