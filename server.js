@@ -2664,6 +2664,6 @@ app.listen(PORT, async () => {
   console.log(`   GET  /check-subscriptions  - Check subscription status`);
   console.log(`${'='.repeat(80)}\n`);
 
-  // Auto-subscribe all pages to feed events
-  await autoSubscribeAllPages();
+  // Auto-subscribe all pages to feed events (disabled - use /subscribe-feed endpoint manually)
+  // await autoSubscribeAllPages();
 });
