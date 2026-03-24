@@ -1674,149 +1674,6 @@ async function postMultipleImagesToFacebook(pageId, pageToken, imageUrls, messag
   }
 }
 
-// =======================
-// SCHEDULED POSTS CHECKER (Multi-Page Support)
-// =======================
-
-async function checkScheduledPosts() {
-  try {
-    console.log('🔍 Checking for scheduled posts across all pages...');
-    
-    // Get all pages from WebhookConfig
-    const configRes = await sheets.spreadsheets.values.get({
-      spreadsheetId: process.env.SHEET_ID,
-      range: 'WebhookConfig!A:D',
-    });
-    
-    const configRows = configRes.data.values || [];
-    
-    if (configRows.length <= 1) {
-      console.log('❌ No pages found in WebhookConfig');
-      return;
-    }
-    
-    // Loop through each page (skip header row)
-    for (let p = 1; p < configRows.length; p++) {
-      const [pageId, pageToken, keywordsSheetId, bookingSheetId] = configRows[p];
-      
-      if (!pageId || !pageToken || !keywordsSheetId) {
-        console.log(`⏭️  Skipping incomplete config row ${p}`);
-        continue;
-      }
-      
-      console.log(`📄 Checking scheduled posts for page: ${pageId}`);
-      
-      try {
-        // Get scheduled posts from the keywords sheet
-        const res = await sheets.spreadsheets.values.get({
-          spreadsheetId: keywordsSheetId,
-          range: 'ScheduledPosts!A:E',
-        });
-        
-        const rows = res.data.values || [];
-        
-        if (rows.length <= 1) {
-          console.log(`  📭 No scheduled posts found for page ${pageId}`);
-          continue;
-        }
-        
-        const now = new Date();
-        let postsFound = 0;
-        
-        // Check each scheduled post
-        for (let i = 1; i < rows.length; i++) {
-          const row = rows[i];
-          const [scheduledTime, type, message, imageUrls, posted] = row;
-          
-          // Skip if already posted
-          if (posted && posted.toLowerCase() === 'yes') {
-            continue;
-          }
-          
-          // Skip if incomplete
-          if (!scheduledTime || !type || !message) {
-            continue;
-          }
-          
-          // Parse scheduled time
-          const postTime = new Date(scheduledTime);
-          
-          // Check if it's time to post (within last 10 minutes)
-          const timeDiff = now - postTime;
-          const tenMinutes = 10 * 60 * 1000;
-          
-          if (timeDiff >= 0 && timeDiff <= tenMinutes) {
-            postsFound++;
-            console.log(`  📅 Time to post for page ${pageId}: "${message.substring(0, 50)}..."`);
-            
-            try {
-              let postResult;
-              
-              // Post based on type
-              if (type === 'text') {
-                postResult = await postToFacebook(pageId, pageToken, message);
-              } else if (type === 'image') {
-                if (!imageUrls) {
-                  console.error('  ❌ No image URL provided for image post');
-                  continue;
-                }
-                postResult = await postImageToFacebook(pageId, pageToken, imageUrls, message);
-              } else if (type === 'album') {
-                if (!imageUrls) {
-                  console.error('  ❌ No image URLs provided for album post');
-                  continue;
-                }
-                const urls = imageUrls.split('|').map(url => url.trim());
-                postResult = await postMultipleImagesToFacebook(pageId, pageToken, urls, message);
-              } else {
-                console.error(`  ❌ Unknown post type: ${type}`);
-                continue;
-              }
-              
-              // Mark as posted
-              await sheets.spreadsheets.values.update({
-                spreadsheetId: keywordsSheetId,
-                range: `ScheduledPosts!E${i + 1}`,
-                valueInputOption: 'RAW',
-                resource: {
-                  values: [['YES']]
-                }
-              });
-              
-              console.log(`  ✅ Post published! Post ID: ${postResult.id}`);
-              
-            } catch (error) {
-              console.error(`  ❌ Error posting:`, error.message);
-            }
-          }
-        }
-        
-        if (postsFound === 0) {
-          console.log(`  ⏰ No posts ready to publish for page ${pageId}`);
-        }
-        
-      } catch (error) {
-        // If ScheduledPosts sheet doesn't exist for this page, that's OK
-        if (error.message && error.message.includes('Unable to parse range')) {
-          console.log(`  ⏭️  No ScheduledPosts sheet found for page ${pageId}`);
-        } else {
-          console.error(`  ❌ Error checking posts for page ${pageId}:`, error.message);
-        }
-      }
-    }
-    
-    console.log('✅ Finished checking all pages');
-    
-  } catch (error) {
-    console.error('❌ Error in scheduled posts checker:', error);
-  }
-}
-
-// Run scheduler every 5 minutes
-setInterval(checkScheduledPosts, 5 * 60 * 1000);
-
-// Run once on startup
-checkScheduledPosts();
 
 // =======================
 // ✅ COMMENT DUPLICATE PROTECTION
@@ -3216,6 +3073,51 @@ app.get('/comments-export', async (req, res) => {
   }
 });
 
+// --- Scheduled Posts Checker (reuse existing jwtClient) ---
+const axios = require('axios'); // make sure axios is imported
+
+// Helper to get a valid access token
+async function getAccessToken() {
+  try {
+    const tokenResponse = await jwtClient.authorize(); // uses existing jwtClient
+    console.log('✅ Access Token fetched');
+    console.log('🔹 Email:', jwtClient.email);
+    console.log('🔹 Scopes:', jwtClient.scopes.join(','));
+    console.log('🔹 Token (first 50 chars):', tokenResponse.access_token.substring(0, 50), '...');
+    return tokenResponse.access_token;
+  } catch (err) {
+    console.error('❌ Error fetching access token:', err);
+    throw err;
+  }
+}
+
+// Scheduled posts checker function
+async function checkScheduledPosts() {
+  try {
+    const accessToken = await getAccessToken();
+
+    // Example API call — replace with your actual scheduled posts endpoint
+    const response = await axios.get(
+      'https://www.googleapis.com/calendar/v3/calendars/primary/events',
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+
+    console.log('✅ Scheduled posts fetched:', response.data.items.length);
+  } catch (err) {
+    console.error('❌ Error in scheduled posts checker:', err.response?.data || err.message);
+  }
+}
+
+// Run every 5 minutes
+setInterval(() => {
+  console.log('🕑 Running scheduled posts check...');
+  checkScheduledPosts();
+}, 5 * 60 * 1000);
+
+// Run once immediately on server start
+checkScheduledPosts();
+
+
 // =======================
 // AUTO-SUBSCRIBE ALL PAGES ON STARTUP
 // =======================
@@ -3282,6 +3184,8 @@ async function autoSubscribeAllPages() {
     console.error('❌ Error in autoSubscribeAllPages:', error.message);
   }
 }
+
+
 
 // =======================
 // SERVER START
