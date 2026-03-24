@@ -126,10 +126,11 @@ try {
    NODEMAILER SETUP
 ======================= */
 
-const nodemailer = require('nodemailer');
+let nodemailer;
 let emailTransporter;
 
 try {
+  nodemailer = require('nodemailer');
   if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASSWORD) {
     emailTransporter = nodemailer.createTransport({
       host: process.env.SMTP_HOST,
@@ -145,7 +146,9 @@ try {
     console.warn('⚠️ Email configuration incomplete in .env');
   }
 } catch (err) {
-  console.error('❌ Email transporter initialization failed:', err.message);
+  console.warn('⚠️ nodemailer package not installed. Email reports disabled.');
+  console.warn('   Install with: npm install nodemailer');
+  emailTransporter = null;
 }
 
 
