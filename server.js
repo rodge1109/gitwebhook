@@ -1,5 +1,5 @@
-   // server.js
- 
+  // server.js
+
 require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
@@ -16,67 +16,6 @@ const greetedUsers = {};
 const billSessions = {};
 const leakSessions = {};
 
-
-// google-auth-debug.js
-require('dotenv').config();
-const { JWT } = require('google-auth-library');
-
-// Read environment variables
-const clientEmail = process.env.GOOGLE_CLIENT_EMAIL;
-let privateKey = process.env.GOOGLE_PRIVATE_KEY;
-
-// Log what is being read from environment variables
-console.log('🔹 GOOGLE_CLIENT_EMAIL:', clientEmail);
-console.log('🔹 GOOGLE_PRIVATE_KEY (first 100 chars):', privateKey?.substring(0, 100), '...');
-
-// Replace literal \n with actual newlines
-privateKey = privateKey.replace(/\\n/g, '\n');
-
-// Log the formatted key first few lines for sanity check
-console.log('🔹 Formatted PRIVATE_KEY (first 3 lines):');
-console.log(privateKey.split('\n').slice(0, 3).join('\n'));
-console.log('...');
-
-// Initialize JWT client
-const jwtClient = new JWT({
-  email: clientEmail,
-  key: privateKey,
-  scopes: ['https://www.googleapis.com/auth/calendar'], // change scope if needed
-});
-
-async function getAccessToken() {
-  try {
-    const tokenResponse = await jwtClient.authorize();
-
-    // Log the token for debugging
-    console.log('✅ Access Token received:', tokenResponse.access_token);
-
-    return tokenResponse.access_token;
-  } catch (error) {
-    console.error('❌ Error fetching access token:', error);
-
-    // Log the raw values being passed for debugging
-    console.log('🔹 Debug info:');
-    console.log('Email passed to JWT:', clientEmail);
-    console.log('Key passed to JWT (first 100 chars):', privateKey.substring(0, 100), '...');
-
-    throw error;
-  }
-}
-
-// Test immediately
-getAccessToken();
-
-async function getAccessToken() {
-  try {
-    const tokenResponse = await jwtClient.authorize();
-    console.log('✅ Access Token:', tokenResponse.access_token);
-    return tokenResponse.access_token;
-  } catch (error) {
-    console.error('❌ Error fetching access token:', error);
-    throw error;
-  }
-}
 
 /**
  * Build a Messenger "web_url" button template attachment.
@@ -162,22 +101,6 @@ try {
 
 
 /* =======================
-   GEMINI AI (DISABLED)
-======================= */
-
-// Gemini AI integration removed. Sentiment analysis is disabled.
-let genAI = null;
-
-
-/* =======================
-   NODEMAILER (DISABLED)
-======================= */
-
-// Nodemailer/email integration removed. Email reports are disabled.
-let emailTransporter = null;
-
-
-/* =======================
    HEALTH CHECK (RENDER)
 ======================= */
 
@@ -208,163 +131,6 @@ app.get('/health', async (req, res) => {
   }
 });
 
-/* =======================
-   COMMENTS COLLECTION & SENTIMENT ANALYSIS
-======================= */
-
-/**
- * Analyze sentiment (DISABLED)
- * Gemini AI integration removed — return neutral placeholder.
- */
-async function analyzeSentiment(commentText) {
-  console.warn('⚠️ Sentiment analysis disabled. Returning NEUTRAL for:', commentText ? commentText.substring(0,80) : '');
-  return { sentiment: 'NEUTRAL', score: 0.5, reason: 'sentiment disabled' };
-}
-
-/**
- * Save comment to Google Sheet
- */
-async function saveCommentToSheet(pageId, commentData, keywordsSheetId) {
-  try {
-    // Use the keywords sheet ID (same sheet where keywords/replies are stored)
-    const sheetId = keywordsSheetId;
-    
-    if (!sheetId) {
-      console.error('❌ No sheet ID configured for comments');
-      return false;
-    }
-
-    const timestamp = new Date().toLocaleString('en-US', { timeZone: 'UTC' });
-    
-    const values = [
-      timestamp,
-      pageId,
-      commentData.commentId,
-      commentData.postId,
-      commentData.senderId,
-      commentData.senderName || 'Unknown',
-      commentData.commentText,
-      commentData.sentiment,
-      commentData.sentimentScore || 0,
-      commentData.sentimentReason || ''
-    ];
-
-    // Ensure the "Comments" sheet exists
-    try {
-      await sheets.spreadsheets.values.append({
-        spreadsheetId: sheetId,
-        range: 'Comments!A:J',
-        valueInputOption: 'RAW',
-        insertDataOption: 'INSERT_ROWS',
-        resource: {
-          values: [values],
-        },
-      });
-      console.log(`✅ Comment saved to sheet: ${commentData.commentId}`);
-      return true;
-    } catch (appendErr) {
-      if (appendErr.message && appendErr.message.includes('Unable to parse range')) {
-        console.log('📄 Creating "Comments" sheet...');
-        
-        // Create the Comments sheet
-        await sheets.spreadsheets.batchUpdate({
-          spreadsheetId: sheetId,
-          resource: {
-            requests: [
-              {
-                addSheet: {
-                  properties: {
-                    title: 'Comments',
-                    gridProperties: {
-                      rowCount: 1000,
-                      columnCount: 10
-                    }
-                  }
-                }
-              }
-            ]
-          }
-        });
-
-        // Add headers
-        await sheets.spreadsheets.values.update({
-          spreadsheetId: sheetId,
-          range: 'Comments!A1:J1',
-          valueInputOption: 'RAW',
-          resource: {
-            values: [['Timestamp', 'Page ID', 'Comment ID', 'Post ID', 'Sender ID', 'Sender Name', 'Comment Text', 'Sentiment', 'Sentiment Score', 'Sentiment Reason']]
-          }
-        });
-
-        // Now append the comment
-        await sheets.spreadsheets.values.append({
-          spreadsheetId: sheetId,
-          range: 'Comments!A:J',
-          valueInputOption: 'RAW',
-          insertDataOption: 'INSERT_ROWS',
-          resource: {
-            values: [values],
-          },
-        });
-
-        console.log(`✅ Comment saved to new "Comments" sheet`);
-        return true;
-      } else {
-        throw appendErr;
-      }
-    }
-  } catch (err) {
-    console.error('❌ Error saving comment to sheet:', err.message);
-    return false;
-  }
-}
-
-/**
- * Send sentiment analysis email report
- */
-async function sendSentimentReportEmail(comments, recipientEmail = null) {
-  console.warn('⚠️ Email reports disabled. sendSentimentReportEmail skipped.');
-  return false;
-}
-
-/**
- * Get sender name from Facebook Graph API
- */
-async function getSenderName(senderId, pageToken) {
-  try {
-    return new Promise((resolve) => {
-      request(
-        {
-          uri: `https://graph.facebook.com/${process.env.GRAPH_API_VERSION}/${senderId}`,
-          qs: { 
-            fields: 'name',
-            access_token: pageToken 
-          },
-          method: 'GET'
-        },
-        (err, res, body) => {
-          try {
-            if (!err && body) {
-              const data = JSON.parse(body);
-              resolve(data.name || 'Unknown');
-            } else {
-              resolve('Unknown');
-            }
-          } catch {
-            resolve('Unknown');
-          }
-        }
-      );
-    });
-  } catch (err) {
-    console.error('Error getting sender name:', err.message);
-    return 'Unknown';
-  }
-}
-
-// Daily sentiment reporting and scheduling removed.
-// scheduleDailySentimentReport() was removed per configuration (email/sentiment disabled).
-
 //SMS INTEGRATION
 // =======================
 // SMS INTEGRATION (Semaphore)
@@ -374,21 +140,21 @@ async function sendSMS(phoneNumber, message, senderName = null) {
   try {
     const https = require('https');
     const querystring = require('querystring');
-    
+
     console.log('📤 Attempting to send SMS:');
     console.log('   To:', phoneNumber);
     console.log('   API Key:', process.env.SEMAPHORE_API_KEY ? 'Set (' + process.env.SEMAPHORE_API_KEY.substring(0, 10) + '...)' : '❌ NOT SET!');
     console.log('   Sender:', process.env.SEMAPHORE_SENDER_NAME || 'KIARA');
     console.log('   Message length:', message.length, 'characters');
     console.log('   Message preview:', message.substring(0, 100) + '...');
-    
+
     const postData = querystring.stringify({
       apikey: process.env.SEMAPHORE_API_KEY,
       number: phoneNumber,
       message: message,
       sendername: senderName || process.env.SEMAPHORE_SENDER_NAME || 'KIARA'
     });
-    
+
     return new Promise((resolve, reject) => {
       const options = {
         hostname: 'api.semaphore.co',
@@ -400,23 +166,23 @@ async function sendSMS(phoneNumber, message, senderName = null) {
           'Content-Length': postData.length
         }
       };
-      
+
       const req = https.request(options, (res) => {
         let data = '';
-        
+
         console.log('📥 Semaphore API Response:');
         console.log('   Status Code:', res.statusCode);
-        
+
         res.on('data', (chunk) => {
           data += chunk;
         });
-        
+
         res.on('end', () => {
           console.log('   Response Body:', data);
-          
+
           try {
             const response = JSON.parse(data);
-            
+
             if (response.message_id || response[0]?.message_id) {
               console.log('✅ SMS sent successfully to:', phoneNumber);
               console.log('   Message ID:', response.message_id || response[0]?.message_id);
@@ -433,12 +199,12 @@ async function sendSMS(phoneNumber, message, senderName = null) {
           }
         });
       });
-      
+
       req.on('error', (err) => {
         console.error('❌ SMS request error:', err.message);
         resolve({ success: false, error: err });
       });
-      
+
       req.write(postData);
       req.end();
     });
@@ -452,15 +218,15 @@ function formatBookingSMS(bookingData, config) {
   let name = '';
   let date = '';
   let details = [];
-  
+
   config.forEach((stepConfig) => {
     const [stepNum, question, type] = stepConfig;
     const answer = bookingData[stepNum];
-    
+
     if (!answer || answer === 'N/A') return;
-    
+
     const questionLower = question.toLowerCase();
-    
+
     if (questionLower.includes('name')) {
       name = answer;
     } 
@@ -471,7 +237,7 @@ function formatBookingSMS(bookingData, config) {
       // Skip contact
     }
     else {
-   
+
       let label = question
         .replace(/\?/g, '')
         .replace(/[📅📱👤🍨📏📝⏰💇🎯✅❌]/g, '')
@@ -480,19 +246,19 @@ function formatBookingSMS(bookingData, config) {
       label = label.split(/\s+/).pop();  // keep the last word only
 
       console.log(label);
-      
+
       details.push(`${label}: ${answer}`);
     }
   });
-  
+
   let smsText = `Booking Alert! A new booking was recieved from ${name ? '' + name : ''}`;
-  
+
   if (date) {
     smsText += ` scheduled for ${date}`;
   }
-  
+
   smsText += '.';
- 
+
   if (details.length > 0) {
     smsText += '\n\n';
     details.forEach((detail, index) => {
@@ -502,11 +268,11 @@ function formatBookingSMS(bookingData, config) {
       }
     });
   }
-  
+
   return smsText;
 }
 
- 
+
 // =======================
 // BOOKING SYSTEM - COMPLETE SCRIPT
 // =======================
@@ -578,17 +344,17 @@ function validateMobileNumber(number) {
 function validateDateFormat(dateString) {
   const cleaned = dateString.trim();
   const parsedDate = new Date(cleaned);
-  
+
   // Check if valid date
   if (isNaN(parsedDate.getTime())) {
     return { valid: false };
   }
-  
+
   // Check if date is in reasonable range
   const now = new Date();
   const minDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const maxDate = new Date(now.getFullYear() + 2, 11, 31);
-  
+
   if (parsedDate < minDate || parsedDate > maxDate) {
     return { valid: false };
   }
@@ -815,7 +581,7 @@ async function saveOrder(psid, orderData, bookingSheetId) {
 
     console.log('Attempting to save to sheet:', bookingSheetId);
     console.log('Data to save:', values);
-    
+
     await sheets.spreadsheets.values.append({
       spreadsheetId: bookingSheetId,
       range: 'ConfirmedOrders!A:Z',
@@ -825,7 +591,7 @@ async function saveOrder(psid, orderData, bookingSheetId) {
         values: [values],
       },
     });
-    
+
     console.log(`Order saved successfully for PSID: ${psid}`);
     return true;
   } catch (err) {
@@ -936,7 +702,7 @@ async function getPageConfig(pageId) {
   try {
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId: process.env.SHEET_ID,
-      range: 'WebhookConfig!A:G',
+      range: 'WebhookConfig!A:D',
     });
 
     const rows = res.data.values || [];
@@ -949,7 +715,6 @@ async function getPageConfig(pageId) {
       pageToken: config[1],
       keywordsSheetId: config[2],
       bookingSheetId: config[3] || config[2],
-      recipientEmail: config[6] || '',
     };
   } catch (err) {
     console.error('Error fetching page config:', err);
@@ -995,13 +760,13 @@ async function logPSID(psid) {
 async function logHelpRequest(psid, userInfo, location, bookingSheetId) {
   try {
     const timestamp = new Date().toLocaleString('en-PH', { timeZone: 'Asia/Manila' });
-    
+
     // Generate Maps link only if coordinates exist
     let mapsLink = '';
     if (location?.lat && location?.long) {
       mapsLink = `https://maps.google.com/?q=${location.lat},${location.long}`;
     }
-    
+
     const values = [
       psid,
       userInfo?.fullName || 'Unknown',
@@ -1067,21 +832,21 @@ async function executeSpecialAction(action, senderPsid, pageToken) {
 async function getAddressFromCoordinates(lat, long) {
   return new Promise((resolve) => {
     const https = require('https');
-    
+
     // Using OpenStreetMap's free Nominatim API
     const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${long}`;
-    
+
     https.get(url, {
       headers: {
         'User-Agent': 'FacebookMessengerBot/1.0'
       }
     }, (res) => {
       let data = '';
-      
+
       res.on('data', (chunk) => {
         data += chunk;
       });
-      
+
       res.on('end', () => {
         try {
           const result = JSON.parse(data);
@@ -1177,10 +942,10 @@ async function getHotlines(sheetId, type = 'emergency') {
         });
       }
     }
-    
+
     console.log(`📞 Found ${hotlines.length} hotline(s) for type: ${type}`);
     return hotlines;
-    
+
   } catch (error) {
     console.error('Error fetching hotlines:', error);
     return [];
@@ -1280,13 +1045,13 @@ async function sendLeakReportSMSToTeam(data, pageId) {
 async function sendHelpAlert(psid, pageToken, keywordsSheetId, location = null, bookingSheetId = null) {
   try {
     console.log(` Help request received from ${psid}`);
-    
+
     // Get user info from Facebook
     const userInfo = await getUserInfo(psid, pageToken);
-    
+
     // Get hotline numbers
     const hotlines = await getHotlines(keywordsSheetId, 'emergency');
-    
+
     if (hotlines.length === 0) {
       console.error('❌ No emergency hotlines configured');
       return {
@@ -1294,12 +1059,12 @@ async function sendHelpAlert(psid, pageToken, keywordsSheetId, location = null, 
         message: "Emergency hotlines not configured. Please contact support directly."
       };
     }
-    
+
     // Build SMS message
     let smsMessage = ` HELP REQUEST ALERT \n\n`;
     smsMessage += `From: ${userInfo.fullName}\n`;
     smsMessage += `Facebook ID: ${psid}\n`;
-    
+
     if (location) {
       smsMessage += `\nLocation:\n`;
       if (location.address) {
@@ -1312,20 +1077,20 @@ async function sendHelpAlert(psid, pageToken, keywordsSheetId, location = null, 
       } else {
       smsMessage += `\nLocation: Not shared\n`;
      }
-    
+
      smsMessage += `\nTime: ${new Date().toLocaleString('en-PH', { timeZone: 'Asia/Manila' })}`;
-    
+
     console.log('SMS Message:\n', smsMessage);
-    
+
     // Send SMS to all hotlines
     let sentCount = 0;
     const results = [];
-    
+
     for (const hotline of hotlines) {
       console.log(`Sending alert to ${hotline.name}: ${hotline.phoneNumber}`);
-      
+
       const smsResult = await sendSMS(hotline.phoneNumber, smsMessage);
-      
+
       if (smsResult.success) {
         sentCount++;
         results.push(` ${hotline.name}`);
@@ -1333,12 +1098,12 @@ async function sendHelpAlert(psid, pageToken, keywordsSheetId, location = null, 
         results.push(` ${hotline.name} (failed)`);
       }
     }
-    
+
     // Log help request to sheet if bookingSheetId is provided
     if (bookingSheetId) {
       await logHelpRequest(psid, userInfo, location, bookingSheetId);
     }
-    
+
     if (sentCount > 0) {
       return {
         success: true,
@@ -1350,7 +1115,7 @@ async function sendHelpAlert(psid, pageToken, keywordsSheetId, location = null, 
         message: "Failed to send emergency alerts. Please try contacting support directly."
       };
     }
-    
+
   } catch (error) {
     console.error('❌ Error sending help alert:', error);
     return {
@@ -1384,9 +1149,9 @@ function requestLocation(senderPsid, pageToken) {
       }
     }
   };
-  
+
   console.log('Sending location request with button template');
-  
+
   request(
     {
       uri: `https://graph.facebook.com/${process.env.GRAPH_API_VERSION}/me/messages`,
@@ -1491,9 +1256,9 @@ function callSendAPI(senderPsid, response, pageToken, quickReplies = null, templ
   } else {
     messageData.message = { text: response };
   }
-  
+
   console.log('API Request Body:', JSON.stringify(messageData, null, 2));
-  
+
   request(
     {
       uri: `https://graph.facebook.com/${process.env.GRAPH_API_VERSION}/me/messages`,
@@ -1512,6 +1277,60 @@ function callSendAPI(senderPsid, response, pageToken, quickReplies = null, templ
 
 // =======================
 // ✅ IMPROVED COMMENT REPLY FUNCTION
+// ✅ LIKE/REACT TO COMMENT
+// =======================
+
+function likeComment(commentId, reactionType = 'LIKE', pageToken) {
+  return new Promise((resolve, reject) => {
+    console.log(`👍 Attempting to ${reactionType} comment ${commentId}`);
+
+    request(
+      {
+        uri: `https://graph.facebook.com/${process.env.GRAPH_API_VERSION || 'v23.0'}/${commentId}/comments`,
+        qs: { access_token: pageToken },
+        method: 'POST',
+        json: { 
+          message: '',
+          user_message: '',
+          attachment: {
+            type: 'reaction',
+            payload: {
+              reaction_type: reactionType
+            }
+          }
+        }
+      },
+      (err, res, body) => {
+        if (!err && body && !body.error) {
+          console.log(`✅ ${reactionType} sent to comment ${commentId}`);
+          resolve(body);
+        } else {
+          // Try alternative method - like endpoint
+          request(
+            {
+              uri: `https://graph.facebook.com/${process.env.GRAPH_API_VERSION || 'v23.0'}/${commentId}/likes`,
+              qs: { access_token: pageToken },
+              method: 'POST',
+              json: { type: reactionType }
+            },
+            (err2, res2, body2) => {
+              if (!err2 && body2 && !body2.error) {
+                console.log(`✅ ${reactionType} reaction added to comment ${commentId}`);
+                resolve(body2);
+              } else {
+                console.error(`❌ Failed to react to comment ${commentId}:`, body?.error || body2?.error || err);
+                resolve(); // Don't reject, continue anyway
+              }
+            }
+          );
+        }
+      }
+    );
+  });
+}
+
+// =======================
+// IMPROVED COMMENT REPLY FUNCTION
 // =======================
 
 function replyToComment(commentId, message, pageToken) {
@@ -1532,7 +1351,7 @@ function replyToComment(commentId, message, pageToken) {
           resolve(body);
         } else {
           console.log('⚠️ Private reply failed, trying public reply...');
-          
+
           // Fallback to public reply
           request(
             {
@@ -1620,7 +1439,7 @@ async function postImageToFacebook(pageId, pageToken, imageUrl, caption = '') {
 async function postMultipleImagesToFacebook(pageId, pageToken, imageUrls, message = '') {
   try {
     const photoIds = [];
-    
+
     for (const imageUrl of imageUrls) {
       const result = await new Promise((resolve, reject) => {
         request(
@@ -1642,10 +1461,10 @@ async function postMultipleImagesToFacebook(pageId, pageToken, imageUrls, messag
           }
         );
       });
-      
+
       photoIds.push({ media_fbid: result });
     }
-    
+
     return new Promise((resolve, reject) => {
       request(
         {
@@ -1674,6 +1493,149 @@ async function postMultipleImagesToFacebook(pageId, pageToken, imageUrls, messag
   }
 }
 
+// =======================
+// SCHEDULED POSTS CHECKER (Multi-Page Support)
+// =======================
+
+async function checkScheduledPosts() {
+  try {
+    console.log('🔍 Checking for scheduled posts across all pages...');
+
+    // Get all pages from WebhookConfig
+    const configRes = await sheets.spreadsheets.values.get({
+      spreadsheetId: process.env.SHEET_ID,
+      range: 'WebhookConfig!A:D',
+    });
+
+    const configRows = configRes.data.values || [];
+
+    if (configRows.length <= 1) {
+      console.log('❌ No pages found in WebhookConfig');
+      return;
+    }
+
+    // Loop through each page (skip header row)
+    for (let p = 1; p < configRows.length; p++) {
+      const [pageId, pageToken, keywordsSheetId, bookingSheetId] = configRows[p];
+
+      if (!pageId || !pageToken || !keywordsSheetId) {
+        console.log(`⏭️  Skipping incomplete config row ${p}`);
+        continue;
+      }
+
+      console.log(`📄 Checking scheduled posts for page: ${pageId}`);
+
+      try {
+        // Get scheduled posts from the keywords sheet
+        const res = await sheets.spreadsheets.values.get({
+          spreadsheetId: keywordsSheetId,
+          range: 'ScheduledPosts!A:E',
+        });
+
+        const rows = res.data.values || [];
+
+        if (rows.length <= 1) {
+          console.log(`  📭 No scheduled posts found for page ${pageId}`);
+          continue;
+        }
+
+        const now = new Date();
+        let postsFound = 0;
+
+        // Check each scheduled post
+        for (let i = 1; i < rows.length; i++) {
+          const row = rows[i];
+          const [scheduledTime, type, message, imageUrls, posted] = row;
+
+          // Skip if already posted
+          if (posted && posted.toLowerCase() === 'yes') {
+            continue;
+          }
+
+          // Skip if incomplete
+          if (!scheduledTime || !type || !message) {
+            continue;
+          }
+
+          // Parse scheduled time
+          const postTime = new Date(scheduledTime);
+
+          // Check if it's time to post (within last 10 minutes)
+          const timeDiff = now - postTime;
+          const tenMinutes = 10 * 60 * 1000;
+
+          if (timeDiff >= 0 && timeDiff <= tenMinutes) {
+            postsFound++;
+            console.log(`  📅 Time to post for page ${pageId}: "${message.substring(0, 50)}..."`);
+
+            try {
+              let postResult;
+
+              // Post based on type
+              if (type === 'text') {
+                postResult = await postToFacebook(pageId, pageToken, message);
+              } else if (type === 'image') {
+                if (!imageUrls) {
+                  console.error('  ❌ No image URL provided for image post');
+                  continue;
+                }
+                postResult = await postImageToFacebook(pageId, pageToken, imageUrls, message);
+              } else if (type === 'album') {
+                if (!imageUrls) {
+                  console.error('  ❌ No image URLs provided for album post');
+                  continue;
+                }
+                const urls = imageUrls.split('|').map(url => url.trim());
+                postResult = await postMultipleImagesToFacebook(pageId, pageToken, urls, message);
+              } else {
+                console.error(`  ❌ Unknown post type: ${type}`);
+                continue;
+              }
+
+              // Mark as posted
+              await sheets.spreadsheets.values.update({
+                spreadsheetId: keywordsSheetId,
+                range: `ScheduledPosts!E${i + 1}`,
+                valueInputOption: 'RAW',
+                resource: {
+                  values: [['YES']]
+                }
+              });
+
+              console.log(`  ✅ Post published! Post ID: ${postResult.id}`);
+
+            } catch (error) {
+              console.error(`  ❌ Error posting:`, error.message);
+            }
+          }
+        }
+
+        if (postsFound === 0) {
+          console.log(`  ⏰ No posts ready to publish for page ${pageId}`);
+        }
+
+      } catch (error) {
+        // If ScheduledPosts sheet doesn't exist for this page, that's OK
+        if (error.message && error.message.includes('Unable to parse range')) {
+          console.log(`  ⏭️  No ScheduledPosts sheet found for page ${pageId}`);
+        } else {
+          console.error(`  ❌ Error checking posts for page ${pageId}:`, error.message);
+        }
+      }
+    }
+
+    console.log('✅ Finished checking all pages');
+
+  } catch (error) {
+    console.error('❌ Error in scheduled posts checker:', error);
+  }
+}
+
+// Run scheduler every 5 minutes
+setInterval(checkScheduledPosts, 5 * 60 * 1000);
+
+// Run once on startup
+checkScheduledPosts();
 
 // =======================
 // ✅ COMMENT DUPLICATE PROTECTION
@@ -1687,7 +1649,7 @@ setInterval(() => {
   processedComments.clear();
 }, 60 * 60 * 1000);
 
- 
+
 
 // =======================
 // Get Page Token
@@ -1695,15 +1657,15 @@ setInterval(() => {
 async function getPageToken(pageId) {
   try {
     const config = await getPageConfig(pageId);
-    
+
     if (config && config.pageToken) {
       console.log(`✅ Token retrieved for page ${pageId}`);
       return config.pageToken;
     }
-    
+
     console.warn(`⚠️ No token in sheet for page ${pageId}, using env fallback`);
     return process.env.PAGE_ACCESS_TOKEN;
-    
+
   } catch (error) {
     console.error('❌ Error getting page token:', error.message);
     return process.env.PAGE_ACCESS_TOKEN;
@@ -1716,11 +1678,11 @@ async function getPageToken(pageId) {
 // =======================
 app.get('/webhook', (req, res) => {
   const VERIFY_TOKEN = process.env.VERIFY_TOKEN || 'your_verify_token_here';
-  
+
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
   const challenge = req.query['hub.challenge'];
-  
+
   if (mode && token) {
     if (mode === 'subscribe' && token === VERIFY_TOKEN) {
       console.log('✅ WEBHOOK_VERIFIED');
@@ -1746,12 +1708,12 @@ app.post('/webhook', async (req, res) => {
     for (const entry of body.entry) {
       const pageId = entry.id;
       const pageToken = await getPageToken(pageId);
-      
+
       if (!pageToken) {
         console.error(`❌ No token retrieved for page ${pageId}`);
         continue;
       }
-      
+
       console.log(`✅ Token retrieved for page ${pageId} (length: ${pageToken.length})`);
 
       // Handle Messenger messages and postbacks
@@ -1871,7 +1833,7 @@ app.post('/webhook', async (req, res) => {
             } else if (payload === 'HELP_SHARE_LOCATION') {
               // Handle help location request
               console.log(`📍 User clicked location button for help request`);
-              
+
               sendTyping(senderPsid, pageToken);
               setTimeout(() => {
                 callSendAPI(senderPsid, 
@@ -1879,7 +1841,7 @@ app.post('/webhook', async (req, res) => {
                   pageToken
                 );
               }, 1000);
-              
+
               // Mark as pending so we can process either location or text
               if (!bookingSessions[senderPsid]) {
                 bookingSessions[senderPsid] = {
@@ -1900,31 +1862,31 @@ app.post('/webhook', async (req, res) => {
 // ==========================================
 if (messaging.message && messaging.message.attachments) {
   const attachments = messaging.message.attachments;
-  
+
   console.log('📎 Attachments received:', JSON.stringify(attachments, null, 2));
-  
+
   // Check if user sent a location
   const locationAttachment = attachments.find(att => att.type === 'location');
-  
+
   console.log('🔍 Location attachment found:', locationAttachment ? 'YES' : 'NO');
-  
+
 if (locationAttachment) {
   console.log('📍 Full location payload:', JSON.stringify(locationAttachment, null, 2));
-  
+
   const coords = locationAttachment.payload.coordinates;
   const lat = coords.lat;
   const long = coords.long;
-  
+
   console.log(`📍 Location received from ${senderPsid}: ${lat}, ${long}`);
-  
+
   // Get page config
   const pageConfig = await getPageConfig(pageId);
   const keywordsSheetId = pageConfig?.keywordsSheetId;
   const bookingSheetId = pageConfig?.bookingSheetId;
-  
+
   // Get address from coordinates using reverse geocoding
   const address = await getAddressFromCoordinates(lat, long);
-  
+
   // Store location in cache
   userLocations[senderPsid] = {
     lat: lat,
@@ -1932,16 +1894,16 @@ if (locationAttachment) {
     address: address,
     timestamp: Date.now()
   };
-  
+
   console.log(`💾 Location stored for ${senderPsid}`);
-  
+
   // Check if this was in response to a help request
   if (pendingHelpRequests.has(senderPsid)) {
     console.log(`🚨 Processing pending help request with location for ${senderPsid}`);
-    
+
     // Remove from pending
     pendingHelpRequests.delete(senderPsid);
-    
+
     // Send help alert WITH location
     const alertResult = await sendHelpAlert(
       senderPsid, 
@@ -1950,7 +1912,7 @@ if (locationAttachment) {
       { lat, long, address },
       bookingSheetId
     );
-    
+
     sendTyping(senderPsid, pageToken);
     setTimeout(() => {
       callSendAPI(senderPsid, alertResult.message, pageToken);
@@ -1963,13 +1925,13 @@ if (locationAttachment) {
     }
     reply += `Coordinates: ${lat}, ${long}\n`;
     reply += `Google Maps: https://www.google.com/maps?q=${lat},${long}`;
-    
+
     sendTyping(senderPsid, pageToken);
     setTimeout(() => {
       callSendAPI(senderPsid, reply, pageToken);
     }, 1500);
   }
-  
+
   continue; // Skip text handler
 }
 }
@@ -2007,7 +1969,7 @@ if (messaging.message && (messaging.message.text || messaging.message.quick_repl
   if (bookingSessions[senderPsid] && bookingSessions[senderPsid].step === 'waiting_for_location') {
     console.log(`📍 Processing location input for ${senderPsid}`);
     const userLocation = userInput.trim();
-    
+
     if (userLocation.length < 3) {
       sendTyping(senderPsid, pageToken);
       setTimeout(() => {
@@ -2015,7 +1977,7 @@ if (messaging.message && (messaging.message.text || messaging.message.quick_repl
       }, 1000);
       continue;
     }
-    
+
     // Store location text
     userLocations[senderPsid] = {
       address: userLocation,
@@ -2024,13 +1986,13 @@ if (messaging.message && (messaging.message.text || messaging.message.quick_repl
       timestamp: Date.now(),
       isManual: true
     };
-    
+
     // Send help alert with manual location
     const alertResult = await sendHelpAlert(senderPsid, pageToken, keywordsSheetId, { address: userLocation }, bookingSheetId);
-    
+
     // Clear the location wait session
     delete bookingSessions[senderPsid];
-    
+
     sendTyping(senderPsid, pageToken);
     setTimeout(() => {
       callSendAPI(senderPsid, alertResult.message, pageToken);
@@ -2052,16 +2014,16 @@ if (messaging.message && (messaging.message.text || messaging.message.quick_repl
 // ==========================================
 if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 'sos') {
   console.log(`🚨 Emergency help request from ${senderPsid}`);
-  
+
   // Check if user has cached location
   const location = userLocations[senderPsid];
-  
+
   if (location) {
     // User has location, send alert immediately
     console.log(`✅ Using cached location for ${senderPsid}`);
-    
+
     const alertResult = await sendHelpAlert(senderPsid, pageToken, keywordsSheetId, location, bookingSheetId);
-    
+
     sendTyping(senderPsid, pageToken);
     setTimeout(() => {
       callSendAPI(senderPsid, alertResult.message, pageToken);
@@ -2069,16 +2031,16 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
   } else {
     // NO LOCATION - Request it (MANDATORY)
     console.log(`⚠️ No location for ${senderPsid}, requesting now...`);
-    
+
     // Mark as pending help request
     pendingHelpRequests.add(senderPsid);
-    
+
     sendTyping(senderPsid, pageToken);
     setTimeout(() => {
       requestLocation(senderPsid, pageToken);
     }, 1000);
   }
-  
+
   continue;
 }
 
@@ -2467,7 +2429,7 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
         console.log(`🔄 Processing ${entry.changes.length} change(s) for page ${pageId}`);
         for (const change of entry.changes) {
           console.log('📝 Change detected:', change.field);
-          
+
           if (change.field !== 'feed') {
             console.log(`   ⏭️  Skipping non-feed change: ${change.field}`);
             continue;
@@ -2477,7 +2439,7 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
           if (change.field === 'feed' && change.value) {
             const value = change.value;
             console.log(`📋 Feed change value:`, JSON.stringify(value, null, 2));
-            
+
             // Check if this is a comment
             if (value.item === 'comment' && value.comment_id) {
               const commentId = value.comment_id;
@@ -2506,93 +2468,20 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
               // Mark as processed
               processedComments.add(commentId);
 
-              // Get page config early (for keywordsSheetId)
+              // Get page config
               const pageConfig = await getPageConfig(pageId);
               const keywordsSheetId = pageConfig?.keywordsSheetId;
 
               if (!keywordsSheetId) {
-                console.log(`ⓘ No keywords sheet configured for page ${pageId}, skipping comment processing`);
+                console.error(`❌ No keywords sheet configured for page ${pageId}`);
                 continue;
               }
 
-              // ===== NEW: SENTIMENT ANALYSIS & COMMENT COLLECTION =====
-              console.log(`🔍 Starting sentiment analysis for comment: "${commentText.substring(0, 50)}..."`);
-
-              // Get sender name
-              const senderName = await getSenderName(senderId, pageToken);
-              console.log(`👤 Sender: ${senderName} (${senderId})`);
-
-              // Analyze sentiment
-              const sentimentAnalysis = await analyzeSentiment(commentText);
-              console.log(`📊 Sentiment Result: ${sentimentAnalysis.sentiment} (Score: ${sentimentAnalysis.score})`);
-
-              // Save comment to Google Sheet
-              const commentData = {
-                commentId,
-                postId,
-                senderId,
-                senderName,
-                commentText,
-                sentiment: sentimentAnalysis.sentiment,
-                sentimentScore: sentimentAnalysis.score,
-                sentimentReason: sentimentAnalysis.reason
-              };
-
-              const saved = await saveCommentToSheet(pageId, commentData, keywordsSheetId);
-              
-              if (!saved) {
-                console.warn(`⚠️ Failed to save comment to sheet`);
-              }
-
-              // Send email report if this is the 10th, 50th, or 100th comment
-              try {
-                const res = await sheets.spreadsheets.values.get({
-                  spreadsheetId: keywordsSheetId,
-                  range: 'Comments!A:A',
-                });
-                const commentCount = (res.data.values || []).length - 1; // Subtract header
-                
-                if (commentCount > 0 && (commentCount % 10 === 0)) {
-                  console.log(`📧 Comment milestone reached (${commentCount} comments). Sending report to ${pageConfig?.recipientEmail}...`);
-                  
-                  // Get recent comments for report
-                  const commentRes = await sheets.spreadsheets.values.get({
-                    spreadsheetId: keywordsSheetId,
-                    range: 'Comments!A2:J1000',
-                  });
-                  
-                  const rows = commentRes.data.values || [];
-                  const comments = rows.map(row => ({
-                    timestamp: row[0],
-                    pageId: row[1],
-                    commentId: row[2],
-                    postId: row[3],
-                    senderId: row[4],
-                    senderName: row[5],
-                    commentText: row[6],
-                    sentiment: row[7],
-                    sentimentScore: parseFloat(row[8]) || 0,
-                    sentimentReason: row[9]
-                  }));
-                  
-                  if (comments.length > 0) {
-                    if (pageConfig?.recipientEmail) {
-                      await sendSentimentReportEmail(comments.slice(-20), pageConfig.recipientEmail); // Send last 20
-                    } else {
-                      console.warn(`⚠️ No email configured for milestone report on page ${pageId}`);
-                    }
-                  }
-                }
-              } catch (err) {
-                console.error('❌ Error sending milestone email:', err.message);
-              }
-
-              // ===== OPTIONAL: Auto-reply based on sentiment =====
               // Get keywords
               const keywords = await getKeywords(keywordsSheetId);
               const receivedText = commentText.toLowerCase().trim();
 
-              // Find matching keyword for auto-reply
+              // Find matching keyword
               const match = keywords.find(row => {
                 if (!row[0]) return false;
                 const keywordList = row[0].toLowerCase().split(',').map(k => k.trim());
@@ -2606,6 +2495,9 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
                 reply = responses[Math.floor(Math.random() * responses.length)];
               }
 
+              // Determine reaction type based on keyword match
+              const reactionType = match ? 'LOVE' : 'LIKE';
+
               // Send private reply to comment
               try {
                 console.log(`📤 Attempting to reply to comment ${commentId} with: "${reply}"`);
@@ -2614,6 +2506,13 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
               } catch (error) {
                 console.error(`❌ Failed to reply to comment ${commentId}:`, error.message || error);
                 console.error(`   Full error:`, error);
+              }
+
+              // Auto-like the comment
+              try {
+                await likeComment(commentId, reactionType, pageToken);
+              } catch (error) {
+                console.error(`⚠️  Failed to react to comment ${commentId}:`, error.message || error);
               }
             }
           }
@@ -2624,14 +2523,14 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
   }
   res.sendStatus(200);
 });
- 
+
 // =======================
 // SUBSCRIBE PAGES TO FEED
 // =======================
 app.get('/subscribe-feed', async (req, res) => {
   try {
     const pageConfig = await getPageConfig(process.env.PAGE_ID || req.query.pageId);
-    
+
     if (!pageConfig) {
       return res.status(404).json({ 
         error: 'Page configuration not found',
@@ -2640,7 +2539,7 @@ app.get('/subscribe-feed', async (req, res) => {
     }
 
     const subscribeUrl = `https://graph.facebook.com/${process.env.GRAPH_API_VERSION}/${pageConfig.pageId}/subscribed_apps`;
-    
+
     request.post(
       {
         uri: subscribeUrl,
@@ -2680,7 +2579,7 @@ app.get('/subscribe-feed', async (req, res) => {
 app.get('/check-subscriptions', async (req, res) => {
   try {
     const pageConfig = await getPageConfig(process.env.PAGE_ID || req.query.pageId);
-    
+
     if (!pageConfig) {
       return res.status(404).json({ 
         error: 'Page configuration not found' 
@@ -2688,7 +2587,7 @@ app.get('/check-subscriptions', async (req, res) => {
     }
 
     const checkUrl = `https://graph.facebook.com/${process.env.GRAPH_API_VERSION}/${pageConfig.pageId}/subscribed_apps`;
-    
+
     request.get(
       {
         uri: checkUrl,
@@ -2745,411 +2644,16 @@ app.get('/check-bill-sheet', async (req, res) => {
   }
 });
 
-/* =======================
-   SENTIMENT ANALYSIS API ENDPOINTS
-======================= */
-
-/**
- * GET /comment-stats
- * Get statistics about collected comments
- */
-app.get('/comment-stats', async (req, res) => {
-  try {
-    // Get all pages from WebhookConfig
-    const configRes = await sheets.spreadsheets.values.get({
-      spreadsheetId: process.env.SHEET_ID,
-      range: 'WebhookConfig!A:G',
-    });
-
-    const configRows = configRes.data.values || [];
-    const allComments = [];
-
-    // Fetch comments from each page's keywords sheet
-    for (let i = 1; i < configRows.length; i++) {
-      const [pageId, , keywordsSheetId] = configRows[i];
-      
-      if (!pageId || !keywordsSheetId) continue;
-
-      try {
-        const commentRes = await sheets.spreadsheets.values.get({
-          spreadsheetId: keywordsSheetId,
-          range: 'Comments!A2:J1000',
-        });
-
-        const rows = commentRes.data.values || [];
-        rows.forEach(row => {
-          allComments.push({
-            timestamp: row[0],
-            sentiment: row[7],
-            sentimentScore: parseFloat(row[8]) || 0
-          });
-        });
-      } catch (err) {
-        // Sheet might not have Comments tab yet
-        if (!err.message.includes('Unable to parse range')) {
-          console.error(`Error fetching comments from page:`, err.message);
-        }
-      }
-    }
-
-    const comments = allComments;
-    const positiveCount = comments.filter(c => c.sentiment === 'POSITIVE').length;
-    const negativeCount = comments.filter(c => c.sentiment === 'NEGATIVE').length;
-    const neutralCount = comments.filter(c => c.sentiment === 'NEUTRAL').length;
-    const unknownCount = comments.filter(c => c.sentiment === 'UNKNOWN').length;
-    const avgScore = comments.length > 0 
-      ? comments.reduce((sum, c) => sum + c.sentimentScore, 0) / comments.length 
-      : 0;
-
-    res.json({
-      success: true,
-      totalComments: comments.length,
-      sentimentBreakdown: {
-        positive: positiveCount,
-        negative: negativeCount,
-        neutral: neutralCount,
-        unknown: unknownCount
-      },
-      percentages: {
-        positive: comments.length > 0 ? ((positiveCount / comments.length) * 100).toFixed(1) : '0.0',
-        negative: comments.length > 0 ? ((negativeCount / comments.length) * 100).toFixed(1) : '0.0',
-        neutral: comments.length > 0 ? ((neutralCount / comments.length) * 100).toFixed(1) : '0.0',
-        unknown: comments.length > 0 ? ((unknownCount / comments.length) * 100).toFixed(1) : '0.0'
-      },
-      averageSentimentScore: avgScore.toFixed(2)
-    });
-  } catch (err) {
-    res.status(500).json({ 
-      success: false, 
-      error: err.message,
-      hint: 'Make sure WebhookConfig is set up and pages have keywords sheets' 
-    });
-  }
-});
-
-/**
- * POST /send-sentiment-report
- * Manually trigger sending a sentiment analysis report
- */
-app.post('/send-sentiment-report', async (req, res) => {
-  try {
-    // Get all pages from WebhookConfig
-    const configRes = await sheets.spreadsheets.values.get({
-      spreadsheetId: process.env.SHEET_ID,
-      range: 'WebhookConfig!A:G',
-    });
-
-    const configRows = configRes.data.values || [];
-    const allComments = [];
-
-    // Fetch comments from each page's keywords sheet
-    for (let i = 1; i < configRows.length; i++) {
-      const [pageId, , keywordsSheetId, , , , recipientEmail] = configRows[i];
-      
-      if (!pageId || !keywordsSheetId) continue;
-
-      try {
-        const commentRes = await sheets.spreadsheets.values.get({
-          spreadsheetId: keywordsSheetId,
-          range: 'Comments!A2:J1000',
-        });
-
-        const rows = commentRes.data.values || [];
-        rows.forEach(row => {
-          allComments.push({
-            timestamp: row[0],
-            pageId: row[1],
-            commentId: row[2],
-            postId: row[3],
-            senderId: row[4],
-            senderName: row[5],
-            commentText: row[6],
-            sentiment: row[7],
-            sentimentScore: parseFloat(row[8]) || 0,
-            sentimentReason: row[9]
-          });
-        });
-      } catch (err) {
-        if (!err.message.includes('Unable to parse range')) {
-          console.error(`Error fetching comments:`, err.message);
-        }
-      }
-    }
-
-    if (allComments.length === 0) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'No comments to report yet' 
-      });
-    }
-
-    // Send reports to each page's email with their comments
-    let emailsSent = 0;
-    for (let i = 1; i < configRows.length; i++) {
-      const [pageId, , , , , , recipientEmail] = configRows[i];
-      if (!recipientEmail) continue;
-      
-      // Get comments for this specific page
-      const pageComments = allComments.filter(c => c.pageId === pageId);
-      if (pageComments.length > 0) {
-        const sent = await sendSentimentReportEmail(pageComments.slice(-50), recipientEmail);
-        if (sent) emailsSent++;
-      }
-    }
-
-    if (emailsSent > 0) {
-      res.json({
-        success: true,
-        message: `Sentiment reports sent to ${emailsSent} page email(s)`,
-        totalComments: allComments.length,
-        pageEmailsSent: emailsSent
-      });
-    } else {
-      res.status(500).json({
-        success: false,
-        message: 'Failed to send email. Check configuration.'
-      });
-    }
-  } catch (err) {
-    res.status(500).json({ 
-      success: false, 
-      error: err.message 
-    });
-  }
-});
-
-/**
- * GET /trigger-daily-report
- * Manually trigger the daily sentiment report (for testing)
- */
-app.get('/trigger-daily-report', async (req, res) => {
-  try {
-    // Get all pages from WebhookConfig
-    const configRes = await sheets.spreadsheets.values.get({
-      spreadsheetId: process.env.SHEET_ID,
-      range: 'WebhookConfig!A:G',
-    });
-
-    const configRows = configRes.data.values || [];
-    const allComments = [];
-
-    // Fetch comments from each page's keywords sheet
-    for (let i = 1; i < configRows.length; i++) {
-      const [pageId, , keywordsSheetId, , , , recipientEmail] = configRows[i];
-      
-      if (!pageId || !keywordsSheetId) continue;
-
-      try {
-        const commentRes = await sheets.spreadsheets.values.get({
-          spreadsheetId: keywordsSheetId,
-          range: 'Comments!A2:J1000',
-        });
-
-        const rows = commentRes.data.values || [];
-        rows.forEach(row => {
-          allComments.push({
-            timestamp: row[0],
-            pageId: row[1],
-            commentId: row[2],
-            postId: row[3],
-            senderId: row[4],
-            senderName: row[5],
-            commentText: row[6],
-            sentiment: row[7],
-            sentimentScore: parseFloat(row[8]) || 0,
-            sentimentReason: row[9]
-          });
-        });
-      } catch (err) {
-        if (!err.message.includes('Unable to parse range')) {
-          console.error(`Error fetching comments:`, err.message);
-        }
-      }
-    }
-
-    if (allComments.length === 0) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'No comments to report yet' 
-      });
-    }
-
-    // Filter comments from last 24 hours
-    const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);
-    const recentComments = allComments.filter(c => {
-      const commentTime = new Date(c.timestamp).getTime();
-      return commentTime > oneDayAgo;
-    });
-
-    let emailsSent = 0;
-    if (recentComments.length > 0) {
-      // Send reports to each page's email with their recent comments
-      for (let i = 1; i < configRows.length; i++) {
-        const [pageId, , , , , , recipientEmail] = configRows[i];
-        if (!recipientEmail) continue;
-        
-        const pageComments = recentComments.filter(c => c.pageId === pageId);
-        if (pageComments.length > 0) {
-          const sent = await sendSentimentReportEmail(pageComments, recipientEmail);
-          if (sent) emailsSent++;
-        }
-      }
-    }
-
-    res.json({
-      success: true,
-      message: emailsSent > 0 ? `Daily reports sent to ${emailsSent} email(s)` : 'No comments from last 24h',
-      recentComments: recentComments.length,
-      totalComments: allComments.length,
-      emailsSent
-    });
-  } catch (err) {
-    res.status(500).json({ 
-      success: false, 
-      error: err.message 
-    });
-  }
-});
-
-/**
- * GET /comments-export
- * Export all comments as JSON
- */
-app.get('/comments-export', async (req, res) => {
-  try {
-    // Get all pages from WebhookConfig
-    const configRes = await sheets.spreadsheets.values.get({
-      spreadsheetId: process.env.SHEET_ID,
-      range: 'WebhookConfig!A:G',
-    });
-
-    const configRows = configRes.data.values || [];
-    const allComments = [];
-
-    // Fetch comments from each page's keywords sheet
-    for (let i = 1; i < configRows.length; i++) {
-      const [pageId, , keywordsSheetId] = configRows[i];
-      
-      if (!pageId || !keywordsSheetId) continue;
-
-      try {
-        const commentRes = await sheets.spreadsheets.values.get({
-          spreadsheetId: keywordsSheetId,
-          range: 'Comments!A2:J1000',
-        });
-
-        const rows = commentRes.data.values || [];
-        rows.forEach(row => {
-          allComments.push({
-            timestamp: row[0],
-            pageId: row[1],
-            commentId: row[2],
-            postId: row[3],
-            senderId: row[4],
-            senderName: row[5],
-            commentText: row[6],
-            sentiment: row[7],
-            sentimentScore: parseFloat(row[8]) || 0,
-            sentimentReason: row[9]
-          });
-        });
-      } catch (err) {
-        if (!err.message.includes('Unable to parse range')) {
-          console.error(`Error fetching comments:`, err.message);
-        }
-      }
-    }
-
-    res.json({
-      success: true,
-      totalComments: allComments.length,
-      comments: allComments
-    });
-  } catch (err) {
-    res.status(500).json({ 
-      success: false, 
-      error: err.message 
-    });
-  }
-});
-
-// --- Scheduled Posts Checker (reuse existing jwtClient) ---
-const axios = require('axios'); // make sure axios is imported
-
-// Helper to get a valid access token
-async function getAccessToken() {
-  try {
-    const tokenResponse = await jwtClient.authorize(); // uses existing jwtClient
-    console.log('✅ Access Token fetched');
-    console.log('🔹 Email:', jwtClient.email);
-    console.log('🔹 Scopes:', jwtClient.scopes.join(','));
-    console.log('🔹 Token (first 50 chars):', tokenResponse.access_token.substring(0, 50), '...');
-    return tokenResponse.access_token;
-  } catch (err) {
-    console.error('❌ Error fetching access token:', err);
-    throw err;
-  }
-}
-
-// --- Scheduled Posts Checker (Node.js fetch version, no axios needed) ---
-
-// Helper to get a valid access token using existing jwtClient
-async function getAccessToken() {
-  try {
-    const tokenResponse = await jwtClient.authorize(); // uses your existing jwtClient
-    console.log('✅ Access Token fetched');
-    console.log('🔹 Email:', jwtClient.email);
-    console.log('🔹 Scopes:', jwtClient.scopes.join(','));
-    console.log('🔹 Token (first 50 chars):', tokenResponse.access_token.substring(0, 50), '...');
-    return tokenResponse.access_token;
-  } catch (err) {
-    console.error('❌ Error fetching access token:', err);
-    throw err;
-  }
-}
-
-// Scheduled posts checker function using fetch
-async function checkScheduledPosts() {
-  try {
-    const accessToken = await getAccessToken();
-
-    // Example API call — replace with your actual scheduled posts endpoint
-    const response = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`HTTP ${response.status}: ${errorText}`);
-    }
-
-    const data = await response.json();
-    console.log('✅ Scheduled posts fetched:', data.items?.length || 0);
-  } catch (err) {
-    console.error('❌ Error in scheduled posts checker:', err.message);
-  }
-}
-
-// Run every 5 minutes
-setInterval(() => {
-  console.log('🕑 Running scheduled posts check...');
-  checkScheduledPosts();
-}, 5 * 60 * 1000);
-
-// Run once immediately on server start
-checkScheduledPosts();
-
-
 // =======================
 // AUTO-SUBSCRIBE ALL PAGES ON STARTUP
 // =======================
 async function autoSubscribeAllPages() {
   try {
     console.log('\n🔄 Auto-subscribing all pages to feed events...\n');
-    
+
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId: process.env.SHEET_ID,
-      range: 'WebhookConfig!A:G',
+      range: 'WebhookConfig!A:D',
     });
 
     const rows = res.data.values || [];
@@ -3206,8 +2710,6 @@ async function autoSubscribeAllPages() {
     console.error('❌ Error in autoSubscribeAllPages:', error.message);
   }
 }
-
-
 
 // =======================
 // SERVER START
