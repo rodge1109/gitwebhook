@@ -3091,20 +3091,42 @@ async function getAccessToken() {
   }
 }
 
-// Scheduled posts checker function
+// --- Scheduled Posts Checker (Node.js fetch version, no axios needed) ---
+
+// Helper to get a valid access token using existing jwtClient
+async function getAccessToken() {
+  try {
+    const tokenResponse = await jwtClient.authorize(); // uses your existing jwtClient
+    console.log('✅ Access Token fetched');
+    console.log('🔹 Email:', jwtClient.email);
+    console.log('🔹 Scopes:', jwtClient.scopes.join(','));
+    console.log('🔹 Token (first 50 chars):', tokenResponse.access_token.substring(0, 50), '...');
+    return tokenResponse.access_token;
+  } catch (err) {
+    console.error('❌ Error fetching access token:', err);
+    throw err;
+  }
+}
+
+// Scheduled posts checker function using fetch
 async function checkScheduledPosts() {
   try {
     const accessToken = await getAccessToken();
 
     // Example API call — replace with your actual scheduled posts endpoint
-    const response = await axios.get(
-      'https://www.googleapis.com/calendar/v3/calendars/primary/events',
-      { headers: { Authorization: `Bearer ${accessToken}` } }
-    );
+    const response = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
 
-    console.log('✅ Scheduled posts fetched:', response.data.items.length);
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`HTTP ${response.status}: ${errorText}`);
+    }
+
+    const data = await response.json();
+    console.log('✅ Scheduled posts fetched:', data.items?.length || 0);
   } catch (err) {
-    console.error('❌ Error in scheduled posts checker:', err.response?.data || err.message);
+    console.error('❌ Error in scheduled posts checker:', err.message);
   }
 }
 
