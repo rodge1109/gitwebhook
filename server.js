@@ -101,6 +101,52 @@ try {
 
 
 /* =======================
+   GEMINI AI SETUP
+======================= */
+
+const { GoogleGenerativeAI } = require('@google/generai');
+let genAI;
+
+try {
+  if (process.env.GEMINI_API_KEY) {
+    genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY.replace(/'/g, ''));
+    console.log('✅ Gemini AI initialized');
+  } else {
+    console.warn('⚠️ GEMINI_API_KEY not set in .env');
+  }
+} catch (err) {
+  console.error('❌ Gemini AI initialization failed:', err.message);
+}
+
+
+/* =======================
+   NODEMAILER SETUP
+======================= */
+
+const nodemailer = require('nodemailer');
+let emailTransporter;
+
+try {
+  if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASSWORD) {
+    emailTransporter = nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: parseInt(process.env.SMTP_PORT) || 587,
+      secure: false,
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASSWORD
+      }
+    });
+    console.log('✅ Email transporter initialized');
+  } else {
+    console.warn('⚠️ Email configuration incomplete in .env');
+  }
+} catch (err) {
+  console.error('❌ Email transporter initialization failed:', err.message);
+}
+
+
+/* =======================
    HEALTH CHECK (RENDER)
 ======================= */
 
@@ -130,6 +176,381 @@ app.get('/health', async (req, res) => {
     });
   }
 });
+
+/* =======================
+   COMMENTS COLLECTION & SENTIMENT ANALYSIS
+======================= */
+
+/**
+ * Analyze sentiment of a comment using Gemini AI
+ */
+async function analyzeSentiment(commentText) {
+  try {
+    if (!genAI) {
+      console.error('❌ Gemini AI not initialized');
+      return { sentiment: 'UNKNOWN', score: 0, reason: 'AI not initialized' };
+    }
+
+    const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
+    
+    const prompt = `Analyze the sentiment of this comment and respond ONLY with a JSON object. No other text.
+Comment: "${commentText}"
+
+Respond with ONLY this format:
+{"sentiment": "POSITIVE" or "NEGATIVE" or "NEUTRAL", "score": 0.0-1.0, "reason": "brief reason"}`;
+
+    const result = await model.generateContent(prompt);
+    const responseText = result.response.text();
+    
+    // Extract JSON from response
+    const jsonMatch = responseText.match(/\{[^}]+\}/);
+    if (jsonMatch) {
+      const sentiment = JSON.parse(jsonMatch[0]);
+      console.log(`✅ Sentiment analyzed: ${sentiment.sentiment} (${sentiment.score})`);
+      return sentiment;
+    } else {
+      console.warn('⚠️ Could not extract JSON from AI response');
+      return { sentiment: 'UNKNOWN', score: 0.5, reason: 'Invalid AI response' };
+    }
+  } catch (err) {
+    console.error('❌ Error analyzing sentiment:', err.message);
+    return { sentiment: 'UNKNOWN', score: 0, reason: err.message };
+  }
+}
+
+/**
+ * Save comment to Google Sheet
+ */
+async function saveCommentToSheet(pageId, commentData, keywordsSheetId) {
+  try {
+    // Use the keywords sheet ID (same sheet where keywords/replies are stored)
+    const sheetId = keywordsSheetId;
+    
+    if (!sheetId) {
+      console.error('❌ No sheet ID configured for comments');
+      return false;
+    }
+
+    const timestamp = new Date().toLocaleString('en-US', { timeZone: 'UTC' });
+    
+    const values = [
+      timestamp,
+      pageId,
+      commentData.commentId,
+      commentData.postId,
+      commentData.senderId,
+      commentData.senderName || 'Unknown',
+      commentData.commentText,
+      commentData.sentiment,
+      commentData.sentimentScore || 0,
+      commentData.sentimentReason || ''
+    ];
+
+    // Ensure the "Comments" sheet exists
+    try {
+      await sheets.spreadsheets.values.append({
+        spreadsheetId: sheetId,
+        range: 'Comments!A:J',
+        valueInputOption: 'RAW',
+        insertDataOption: 'INSERT_ROWS',
+        resource: {
+          values: [values],
+        },
+      });
+      console.log(`✅ Comment saved to sheet: ${commentData.commentId}`);
+      return true;
+    } catch (appendErr) {
+      if (appendErr.message && appendErr.message.includes('Unable to parse range')) {
+        console.log('📄 Creating "Comments" sheet...');
+        
+        // Create the Comments sheet
+        await sheets.spreadsheets.batchUpdate({
+          spreadsheetId: sheetId,
+          resource: {
+            requests: [
+              {
+                addSheet: {
+                  properties: {
+                    title: 'Comments',
+                    gridProperties: {
+                      rowCount: 1000,
+                      columnCount: 10
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        });
+
+        // Add headers
+        await sheets.spreadsheets.values.update({
+          spreadsheetId: sheetId,
+          range: 'Comments!A1:J1',
+          valueInputOption: 'RAW',
+          resource: {
+            values: [['Timestamp', 'Page ID', 'Comment ID', 'Post ID', 'Sender ID', 'Sender Name', 'Comment Text', 'Sentiment', 'Sentiment Score', 'Sentiment Reason']]
+          }
+        });
+
+        // Now append the comment
+        await sheets.spreadsheets.values.append({
+          spreadsheetId: sheetId,
+          range: 'Comments!A:J',
+          valueInputOption: 'RAW',
+          insertDataOption: 'INSERT_ROWS',
+          resource: {
+            values: [values],
+          },
+        });
+
+        console.log(`✅ Comment saved to new "Comments" sheet`);
+        return true;
+      } else {
+        throw appendErr;
+      }
+    }
+  } catch (err) {
+    console.error('❌ Error saving comment to sheet:', err.message);
+    return false;
+  }
+}
+
+/**
+ * Send sentiment analysis email report
+ */
+async function sendSentimentReportEmail(comments, recipientEmail = null) {
+  try {
+    if (!emailTransporter) {
+      console.warn('⚠️ Email transporter not configured');
+      return false;
+    }
+
+    const recipients = recipientEmail || process.env.EMAIL_RECIPIENTS || '';
+    if (!recipients) {
+      console.warn('⚠️ No email recipients configured');
+      return false;
+    }
+
+    const positiveCount = comments.filter(c => c.sentiment === 'POSITIVE').length;
+    const negativeCount = comments.filter(c => c.sentiment === 'NEGATIVE').length;
+    const neutralCount = comments.filter(c => c.sentiment === 'NEUTRAL').length;
+    const avgScore = comments.reduce((sum, c) => sum + (c.sentimentScore || 0), 0) / comments.length || 0;
+
+    let emailBody = `<h2>📊 Sentiment Analysis Report</h2>
+<p><strong>Report Generated:</strong> ${new Date().toLocaleString('en-US', { timeZone: 'UTC' })}</p>
+
+<h3>Summary</h3>
+<ul>
+  <li><strong>Total Comments Analyzed:</strong> ${comments.length}</li>
+  <li><strong>Positive:</strong> ${positiveCount} (${((positiveCount / comments.length) * 100).toFixed(1)}%)</li>
+  <li><strong>Negative:</strong> ${negativeCount} (${((negativeCount / comments.length) * 100).toFixed(1)}%)</li>
+  <li><strong>Neutral:</strong> ${neutralCount} (${((neutralCount / comments.length) * 100).toFixed(1)}%)</li>
+  <li><strong>Average Sentiment Score:</strong> ${avgScore.toFixed(2)}</li>
+</ul>
+
+<h3>Recent Comments</h3>
+<table border="1" cellpadding="10">
+  <tr>
+    <th>Timestamp</th>
+    <th>Comment</th>
+    <th>Sentiment</th>
+    <th>Score</th>
+  </tr>`;
+
+    comments.slice(-20).forEach(comment => {
+      const sentimentEmoji = comment.sentiment === 'POSITIVE' ? '😊' : comment.sentiment === 'NEGATIVE' ? '😠' : '😐';
+      emailBody += `
+  <tr>
+    <td>${comment.timestamp || 'N/A'}</td>
+    <td>${(comment.commentText || '').substring(0, 100)}...</td>
+    <td>${sentimentEmoji} ${comment.sentiment}</td>
+    <td>${(comment.sentimentScore || 0).toFixed(2)}</td>
+  </tr>`;
+    });
+
+    emailBody += `</table>`;
+
+    const mailOptions = {
+      from: process.env.EMAIL_FROM || process.env.SMTP_USER,
+      to: recipients,
+      subject: `📊 Facebook Comments Sentiment Analysis Report - ${new Date().toLocaleDateString()}`,
+      html: emailBody
+    };
+
+    await emailTransporter.sendMail(mailOptions);
+    console.log(`✅ Sentiment report email sent to: ${recipients}`);
+    return true;
+  } catch (err) {
+    console.error('❌ Error sending email:', err.message);
+    return false;
+  }
+}
+
+/**
+ * Get sender name from Facebook Graph API
+ */
+async function getSenderName(senderId, pageToken) {
+  try {
+    return new Promise((resolve) => {
+      request(
+        {
+          uri: `https://graph.facebook.com/${process.env.GRAPH_API_VERSION}/${senderId}`,
+          qs: { 
+            fields: 'name',
+            access_token: pageToken 
+          },
+          method: 'GET'
+        },
+        (err, res, body) => {
+          try {
+            if (!err && body) {
+              const data = JSON.parse(body);
+              resolve(data.name || 'Unknown');
+            } else {
+              resolve('Unknown');
+            }
+          } catch {
+            resolve('Unknown');
+          }
+        }
+      );
+    });
+  } catch (err) {
+    console.error('Error getting sender name:', err.message);
+    return 'Unknown';
+  }
+}
+
+// Scheduled task to send daily sentiment report (run at 9 AM UTC)
+function scheduleDailySentimentReport() {
+  setInterval(async () => {
+    const now = new Date();
+    if (now.getHours() === 9 && now.getMinutes() < 5) {
+      console.log('📊 Running scheduled sentiment report...');
+      try {
+        // Get all pages from WebhookConfig
+        const configRes = await sheets.spreadsheets.values.get({
+          spreadsheetId: process.env.SHEET_ID,
+          range: 'WebhookConfig!A:G',
+        });
+
+        const configRows = configRes.data.values || [];
+        const allComments = [];
+
+        // Fetch comments from each page's keywords sheet
+        for (let i = 1; i < configRows.length; i++) {
+          const [pageId, , keywordsSheetId, , , , recipientEmail] = configRows[i];
+          
+          if (!pageId || !keywordsSheetId) continue;
+
+          try {
+            const res = await sheets.spreadsheets.values.get({
+              spreadsheetId: keywordsSheetId,
+              range: 'Comments!A2:J1000',
+            });
+
+            const rows = res.data.values || [];
+            if (rows.length > 0) {
+              rows.forEach(row => {
+                allComments.push({
+                  timestamp: row[0],
+                  pageId: row[1],
+                  commentId: row[2],
+                  postId: row[3],
+                  senderId: row[4],
+                  senderName: row[5],
+                  commentText: row[6],
+                  sentiment: row[7],
+                  sentimentScore: parseFloat(row[8]) || 0,
+                  sentimentReason: row[9]
+                });
+              });
+            }
+          } catch (err) {
+            // Sheet might not have Comments tab yet, that's OK
+            if (!err.message.includes('Unable to parse range')) {
+              console.error(`Error fetching comments from page ${pageId}:`, err.message);
+            }
+          }
+        }
+
+        // Send reports to each page's email with their comments
+        for (let i = 1; i < configRows.length; i++) {
+          const [pageId, , keywordsSheetId, , recipientEmail] = configRows[i];
+          
+          if (!pageId || !keywordsSheetId || !recipientEmail) continue;
+
+          try {
+            const res = await sheets.spreadsheets.values.get({
+              spreadsheetId: keywordsSheetId,
+              range: 'Comments!A2:J1000',
+            });
+
+            const rows = res.data.values || [];
+            const pageComments = [];
+            const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);
+            
+            if (rows.length > 0) {
+              rows.forEach(row => {
+                const timestamp = new Date(row[0]);
+                if (timestamp.getTime() > oneDayAgo) {
+                  pageComments.push({
+                    timestamp: row[0],
+                    pageId: row[1],
+                    commentId: row[2],
+                    postId: row[3],
+                    senderId: row[4],
+                    senderName: row[5],
+                    commentText: row[6],
+                    sentiment: row[7],
+                    sentimentScore: parseFloat(row[8]) || 0,
+                    sentimentReason: row[9]
+                  });
+                }
+              });
+            }
+
+            if (pageComments.length > 0) {
+              console.log(`📧 Sending daily report for page ${pageId} to ${recipientEmail} (${pageComments.length} comments)`);
+              await sendSentimentReportEmail(pageComments, recipientEmail);
+            }
+          } catch (err) {
+            if (!err.message.includes('Unable to parse range')) {
+              console.error(`Error fetching comments for page ${pageId}:`, err.message);
+            }
+          }
+        }
+
+        console.log('✅ Daily sentiment reports completed');
+        return;
+        
+        // Old code (archived):
+        if (false && allComments.length > 0) {
+          // Filter comments from last 24 hours
+          const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);
+          const recentComments = allComments.filter(c => {
+            const commentTime = new Date(c.timestamp).getTime();
+            return commentTime > oneDayAgo;
+          });
+
+          if (recentComments.length > 0) {
+            await sendSentimentReportEmail(recentComments);
+          } else {
+            console.log('ℹ️ No comments in the last 24 hours for report');
+          }
+        } else {
+          console.log('ℹ️ No comments found across all pages');
+        }
+      } catch (err) {
+        console.error('❌ Error scheduling sentiment report:', err.message);
+      }
+    }
+  }, 60 * 1000); // Check every minute
+}
+
+// Start the scheduled report
+scheduleDailySentimentReport();
 
 //SMS INTEGRATION
 // =======================
@@ -702,7 +1123,7 @@ async function getPageConfig(pageId) {
   try {
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId: process.env.SHEET_ID,
-      range: 'WebhookConfig!A:D',
+      range: 'WebhookConfig!A:G',
     });
 
     const rows = res.data.values || [];
@@ -715,6 +1136,7 @@ async function getPageConfig(pageId) {
       pageToken: config[1],
       keywordsSheetId: config[2],
       bookingSheetId: config[3] || config[2],
+      recipientEmail: config[6] || '',
     };
   } catch (err) {
     console.error('Error fetching page config:', err);
@@ -2467,20 +2889,93 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
               // Mark as processed
               processedComments.add(commentId);
 
-              // Get page config
+              // Get page config early (for keywordsSheetId)
               const pageConfig = await getPageConfig(pageId);
               const keywordsSheetId = pageConfig?.keywordsSheetId;
 
               if (!keywordsSheetId) {
-                console.error(`❌ No keywords sheet configured for page ${pageId}`);
+                console.log(`ⓘ No keywords sheet configured for page ${pageId}, skipping comment processing`);
                 continue;
               }
 
+              // ===== NEW: SENTIMENT ANALYSIS & COMMENT COLLECTION =====
+              console.log(`🔍 Starting sentiment analysis for comment: "${commentText.substring(0, 50)}..."`);
+
+              // Get sender name
+              const senderName = await getSenderName(senderId, pageToken);
+              console.log(`👤 Sender: ${senderName} (${senderId})`);
+
+              // Analyze sentiment
+              const sentimentAnalysis = await analyzeSentiment(commentText);
+              console.log(`📊 Sentiment Result: ${sentimentAnalysis.sentiment} (Score: ${sentimentAnalysis.score})`);
+
+              // Save comment to Google Sheet
+              const commentData = {
+                commentId,
+                postId,
+                senderId,
+                senderName,
+                commentText,
+                sentiment: sentimentAnalysis.sentiment,
+                sentimentScore: sentimentAnalysis.score,
+                sentimentReason: sentimentAnalysis.reason
+              };
+
+              const saved = await saveCommentToSheet(pageId, commentData, keywordsSheetId);
+              
+              if (!saved) {
+                console.warn(`⚠️ Failed to save comment to sheet`);
+              }
+
+              // Send email report if this is the 10th, 50th, or 100th comment
+              try {
+                const res = await sheets.spreadsheets.values.get({
+                  spreadsheetId: keywordsSheetId,
+                  range: 'Comments!A:A',
+                });
+                const commentCount = (res.data.values || []).length - 1; // Subtract header
+                
+                if (commentCount > 0 && (commentCount % 10 === 0)) {
+                  console.log(`📧 Comment milestone reached (${commentCount} comments). Sending report to ${pageConfig?.recipientEmail}...`);
+                  
+                  // Get recent comments for report
+                  const commentRes = await sheets.spreadsheets.values.get({
+                    spreadsheetId: keywordsSheetId,
+                    range: 'Comments!A2:J1000',
+                  });
+                  
+                  const rows = commentRes.data.values || [];
+                  const comments = rows.map(row => ({
+                    timestamp: row[0],
+                    pageId: row[1],
+                    commentId: row[2],
+                    postId: row[3],
+                    senderId: row[4],
+                    senderName: row[5],
+                    commentText: row[6],
+                    sentiment: row[7],
+                    sentimentScore: parseFloat(row[8]) || 0,
+                    sentimentReason: row[9]
+                  }));
+                  
+                  if (comments.length > 0) {
+                    if (pageConfig?.recipientEmail) {
+                      await sendSentimentReportEmail(comments.slice(-20), pageConfig.recipientEmail); // Send last 20
+                    } else {
+                      console.warn(`⚠️ No email configured for milestone report on page ${pageId}`);
+                    }
+                  }
+                }
+              } catch (err) {
+                console.error('❌ Error sending milestone email:', err.message);
+              }
+
+              // ===== OPTIONAL: Auto-reply based on sentiment =====
               // Get keywords
               const keywords = await getKeywords(keywordsSheetId);
               const receivedText = commentText.toLowerCase().trim();
 
-              // Find matching keyword
+              // Find matching keyword for auto-reply
               const match = keywords.find(row => {
                 if (!row[0]) return false;
                 const keywordList = row[0].toLowerCase().split(',').map(k => k.trim());
@@ -2643,6 +3138,334 @@ app.get('/check-bill-sheet', async (req, res) => {
   }
 });
 
+/* =======================
+   SENTIMENT ANALYSIS API ENDPOINTS
+======================= */
+
+/**
+ * GET /comment-stats
+ * Get statistics about collected comments
+ */
+app.get('/comment-stats', async (req, res) => {
+  try {
+    // Get all pages from WebhookConfig
+    const configRes = await sheets.spreadsheets.values.get({
+      spreadsheetId: process.env.SHEET_ID,
+      range: 'WebhookConfig!A:G',
+    });
+
+    const configRows = configRes.data.values || [];
+    const allComments = [];
+
+    // Fetch comments from each page's keywords sheet
+    for (let i = 1; i < configRows.length; i++) {
+      const [pageId, , keywordsSheetId] = configRows[i];
+      
+      if (!pageId || !keywordsSheetId) continue;
+
+      try {
+        const commentRes = await sheets.spreadsheets.values.get({
+          spreadsheetId: keywordsSheetId,
+          range: 'Comments!A2:J1000',
+        });
+
+        const rows = commentRes.data.values || [];
+        rows.forEach(row => {
+          allComments.push({
+            timestamp: row[0],
+            sentiment: row[7],
+            sentimentScore: parseFloat(row[8]) || 0
+          });
+        });
+      } catch (err) {
+        // Sheet might not have Comments tab yet
+        if (!err.message.includes('Unable to parse range')) {
+          console.error(`Error fetching comments from page:`, err.message);
+        }
+      }
+    }
+
+    const comments = allComments;
+    const positiveCount = comments.filter(c => c.sentiment === 'POSITIVE').length;
+    const negativeCount = comments.filter(c => c.sentiment === 'NEGATIVE').length;
+    const neutralCount = comments.filter(c => c.sentiment === 'NEUTRAL').length;
+    const unknownCount = comments.filter(c => c.sentiment === 'UNKNOWN').length;
+    const avgScore = comments.length > 0 
+      ? comments.reduce((sum, c) => sum + c.sentimentScore, 0) / comments.length 
+      : 0;
+
+    res.json({
+      success: true,
+      totalComments: comments.length,
+      sentimentBreakdown: {
+        positive: positiveCount,
+        negative: negativeCount,
+        neutral: neutralCount,
+        unknown: unknownCount
+      },
+      percentages: {
+        positive: comments.length > 0 ? ((positiveCount / comments.length) * 100).toFixed(1) : '0.0',
+        negative: comments.length > 0 ? ((negativeCount / comments.length) * 100).toFixed(1) : '0.0',
+        neutral: comments.length > 0 ? ((neutralCount / comments.length) * 100).toFixed(1) : '0.0',
+        unknown: comments.length > 0 ? ((unknownCount / comments.length) * 100).toFixed(1) : '0.0'
+      },
+      averageSentimentScore: avgScore.toFixed(2)
+    });
+  } catch (err) {
+    res.status(500).json({ 
+      success: false, 
+      error: err.message,
+      hint: 'Make sure WebhookConfig is set up and pages have keywords sheets' 
+    });
+  }
+});
+
+/**
+ * POST /send-sentiment-report
+ * Manually trigger sending a sentiment analysis report
+ */
+app.post('/send-sentiment-report', async (req, res) => {
+  try {
+    // Get all pages from WebhookConfig
+    const configRes = await sheets.spreadsheets.values.get({
+      spreadsheetId: process.env.SHEET_ID,
+      range: 'WebhookConfig!A:G',
+    });
+
+    const configRows = configRes.data.values || [];
+    const allComments = [];
+
+    // Fetch comments from each page's keywords sheet
+    for (let i = 1; i < configRows.length; i++) {
+      const [pageId, , keywordsSheetId, , , , recipientEmail] = configRows[i];
+      
+      if (!pageId || !keywordsSheetId) continue;
+
+      try {
+        const commentRes = await sheets.spreadsheets.values.get({
+          spreadsheetId: keywordsSheetId,
+          range: 'Comments!A2:J1000',
+        });
+
+        const rows = commentRes.data.values || [];
+        rows.forEach(row => {
+          allComments.push({
+            timestamp: row[0],
+            pageId: row[1],
+            commentId: row[2],
+            postId: row[3],
+            senderId: row[4],
+            senderName: row[5],
+            commentText: row[6],
+            sentiment: row[7],
+            sentimentScore: parseFloat(row[8]) || 0,
+            sentimentReason: row[9]
+          });
+        });
+      } catch (err) {
+        if (!err.message.includes('Unable to parse range')) {
+          console.error(`Error fetching comments:`, err.message);
+        }
+      }
+    }
+
+    if (allComments.length === 0) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'No comments to report yet' 
+      });
+    }
+
+    // Send reports to each page's email with their comments
+    let emailsSent = 0;
+    for (let i = 1; i < configRows.length; i++) {
+      const [pageId, , , , , , recipientEmail] = configRows[i];
+      if (!recipientEmail) continue;
+      
+      // Get comments for this specific page
+      const pageComments = allComments.filter(c => c.pageId === pageId);
+      if (pageComments.length > 0) {
+        const sent = await sendSentimentReportEmail(pageComments.slice(-50), recipientEmail);
+        if (sent) emailsSent++;
+      }
+    }
+
+    if (emailsSent > 0) {
+      res.json({
+        success: true,
+        message: `Sentiment reports sent to ${emailsSent} page email(s)`,
+        totalComments: allComments.length,
+        pageEmailsSent: emailsSent
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        message: 'Failed to send email. Check configuration.'
+      });
+    }
+  } catch (err) {
+    res.status(500).json({ 
+      success: false, 
+      error: err.message 
+    });
+  }
+});
+
+/**
+ * GET /trigger-daily-report
+ * Manually trigger the daily sentiment report (for testing)
+ */
+app.get('/trigger-daily-report', async (req, res) => {
+  try {
+    // Get all pages from WebhookConfig
+    const configRes = await sheets.spreadsheets.values.get({
+      spreadsheetId: process.env.SHEET_ID,
+      range: 'WebhookConfig!A:G',
+    });
+
+    const configRows = configRes.data.values || [];
+    const allComments = [];
+
+    // Fetch comments from each page's keywords sheet
+    for (let i = 1; i < configRows.length; i++) {
+      const [pageId, , keywordsSheetId, , , , recipientEmail] = configRows[i];
+      
+      if (!pageId || !keywordsSheetId) continue;
+
+      try {
+        const commentRes = await sheets.spreadsheets.values.get({
+          spreadsheetId: keywordsSheetId,
+          range: 'Comments!A2:J1000',
+        });
+
+        const rows = commentRes.data.values || [];
+        rows.forEach(row => {
+          allComments.push({
+            timestamp: row[0],
+            pageId: row[1],
+            commentId: row[2],
+            postId: row[3],
+            senderId: row[4],
+            senderName: row[5],
+            commentText: row[6],
+            sentiment: row[7],
+            sentimentScore: parseFloat(row[8]) || 0,
+            sentimentReason: row[9]
+          });
+        });
+      } catch (err) {
+        if (!err.message.includes('Unable to parse range')) {
+          console.error(`Error fetching comments:`, err.message);
+        }
+      }
+    }
+
+    if (allComments.length === 0) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'No comments to report yet' 
+      });
+    }
+
+    // Filter comments from last 24 hours
+    const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);
+    const recentComments = allComments.filter(c => {
+      const commentTime = new Date(c.timestamp).getTime();
+      return commentTime > oneDayAgo;
+    });
+
+    let emailsSent = 0;
+    if (recentComments.length > 0) {
+      // Send reports to each page's email with their recent comments
+      for (let i = 1; i < configRows.length; i++) {
+        const [pageId, , , , , , recipientEmail] = configRows[i];
+        if (!recipientEmail) continue;
+        
+        const pageComments = recentComments.filter(c => c.pageId === pageId);
+        if (pageComments.length > 0) {
+          const sent = await sendSentimentReportEmail(pageComments, recipientEmail);
+          if (sent) emailsSent++;
+        }
+      }
+    }
+
+    res.json({
+      success: true,
+      message: emailsSent > 0 ? `Daily reports sent to ${emailsSent} email(s)` : 'No comments from last 24h',
+      recentComments: recentComments.length,
+      totalComments: allComments.length,
+      emailsSent
+    });
+  } catch (err) {
+    res.status(500).json({ 
+      success: false, 
+      error: err.message 
+    });
+  }
+});
+
+/**
+ * GET /comments-export
+ * Export all comments as JSON
+ */
+app.get('/comments-export', async (req, res) => {
+  try {
+    // Get all pages from WebhookConfig
+    const configRes = await sheets.spreadsheets.values.get({
+      spreadsheetId: process.env.SHEET_ID,
+      range: 'WebhookConfig!A:G',
+    });
+
+    const configRows = configRes.data.values || [];
+    const allComments = [];
+
+    // Fetch comments from each page's keywords sheet
+    for (let i = 1; i < configRows.length; i++) {
+      const [pageId, , keywordsSheetId] = configRows[i];
+      
+      if (!pageId || !keywordsSheetId) continue;
+
+      try {
+        const commentRes = await sheets.spreadsheets.values.get({
+          spreadsheetId: keywordsSheetId,
+          range: 'Comments!A2:J1000',
+        });
+
+        const rows = commentRes.data.values || [];
+        rows.forEach(row => {
+          allComments.push({
+            timestamp: row[0],
+            pageId: row[1],
+            commentId: row[2],
+            postId: row[3],
+            senderId: row[4],
+            senderName: row[5],
+            commentText: row[6],
+            sentiment: row[7],
+            sentimentScore: parseFloat(row[8]) || 0,
+            sentimentReason: row[9]
+          });
+        });
+      } catch (err) {
+        if (!err.message.includes('Unable to parse range')) {
+          console.error(`Error fetching comments:`, err.message);
+        }
+      }
+    }
+
+    res.json({
+      success: true,
+      totalComments: allComments.length,
+      comments: allComments
+    });
+  } catch (err) {
+    res.status(500).json({ 
+      success: false, 
+      error: err.message 
+    });
+  }
+});
+
 // =======================
 // AUTO-SUBSCRIBE ALL PAGES ON STARTUP
 // =======================
@@ -2652,7 +3475,7 @@ async function autoSubscribeAllPages() {
     
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId: process.env.SHEET_ID,
-      range: 'WebhookConfig!A:D',
+      range: 'WebhookConfig!A:G',
     });
 
     const rows = res.data.values || [];
