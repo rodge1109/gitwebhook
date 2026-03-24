@@ -1704,60 +1704,7 @@ function callSendAPI(senderPsid, response, pageToken, quickReplies = null, templ
 }
 
 // =======================
-// ✅ LIKE/REACT TO COMMENT
-// =======================
-
-function likeComment(commentId, reactionType = 'LIKE', pageToken) {
-  return new Promise((resolve, reject) => {
-    console.log(`👍 Attempting to ${reactionType} comment ${commentId}`);
-
-    request(
-      {
-        uri: `https://graph.facebook.com/${process.env.GRAPH_API_VERSION || 'v23.0'}/${commentId}/comments`,
-        qs: { access_token: pageToken },
-        method: 'POST',
-        json: { 
-          message: '',
-          user_message: '',
-          attachment: {
-            type: 'reaction',
-            payload: {
-              reaction_type: reactionType
-            }
-          }
-        }
-      },
-      (err, res, body) => {
-        if (!err && body && !body.error) {
-          console.log(`✅ ${reactionType} sent to comment ${commentId}`);
-          resolve(body);
-        } else {
-          // Try alternative method - like endpoint
-          request(
-            {
-              uri: `https://graph.facebook.com/${process.env.GRAPH_API_VERSION || 'v23.0'}/${commentId}/likes`,
-              qs: { access_token: pageToken },
-              method: 'POST',
-              json: { type: reactionType }
-            },
-            (err2, res2, body2) => {
-              if (!err2 && body2 && !body2.error) {
-                console.log(`✅ ${reactionType} reaction added to comment ${commentId}`);
-                resolve(body2);
-              } else {
-                console.error(`❌ Failed to react to comment ${commentId}:`, body?.error || body2?.error || err);
-                resolve(); // Don't reject, continue anyway
-              }
-            }
-          );
-        }
-      }
-    );
-  });
-}
-
-// =======================
-// IMPROVED COMMENT REPLY FUNCTION
+// ✅ IMPROVED COMMENT REPLY FUNCTION
 // =======================
 
 function replyToComment(commentId, message, pageToken) {
@@ -2995,9 +2942,6 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
                 reply = responses[Math.floor(Math.random() * responses.length)];
               }
 
-              // Determine reaction type based on keyword match
-              const reactionType = match ? 'LOVE' : 'LIKE';
-
               // Send private reply to comment
               try {
                 console.log(`📤 Attempting to reply to comment ${commentId} with: "${reply}"`);
@@ -3006,13 +2950,6 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
               } catch (error) {
                 console.error(`❌ Failed to reply to comment ${commentId}:`, error.message || error);
                 console.error(`   Full error:`, error);
-              }
-
-              // Auto-like the comment
-              try {
-                await likeComment(commentId, reactionType, pageToken);
-              } catch (error) {
-                console.error(`⚠️  Failed to react to comment ${commentId}:`, error.message || error);
               }
             }
           }
