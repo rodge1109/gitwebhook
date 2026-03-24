@@ -17,6 +17,67 @@ const billSessions = {};
 const leakSessions = {};
 
 
+// google-auth-debug.js
+require('dotenv').config();
+const { JWT } = require('google-auth-library');
+
+// Read environment variables
+const clientEmail = process.env.GOOGLE_CLIENT_EMAIL;
+let privateKey = process.env.GOOGLE_PRIVATE_KEY;
+
+// Log what is being read from environment variables
+console.log('🔹 GOOGLE_CLIENT_EMAIL:', clientEmail);
+console.log('🔹 GOOGLE_PRIVATE_KEY (first 100 chars):', privateKey?.substring(0, 100), '...');
+
+// Replace literal \n with actual newlines
+privateKey = privateKey.replace(/\\n/g, '\n');
+
+// Log the formatted key first few lines for sanity check
+console.log('🔹 Formatted PRIVATE_KEY (first 3 lines):');
+console.log(privateKey.split('\n').slice(0, 3).join('\n'));
+console.log('...');
+
+// Initialize JWT client
+const jwtClient = new JWT({
+  email: clientEmail,
+  key: privateKey,
+  scopes: ['https://www.googleapis.com/auth/calendar'], // change scope if needed
+});
+
+async function getAccessToken() {
+  try {
+    const tokenResponse = await jwtClient.authorize();
+
+    // Log the token for debugging
+    console.log('✅ Access Token received:', tokenResponse.access_token);
+
+    return tokenResponse.access_token;
+  } catch (error) {
+    console.error('❌ Error fetching access token:', error);
+
+    // Log the raw values being passed for debugging
+    console.log('🔹 Debug info:');
+    console.log('Email passed to JWT:', clientEmail);
+    console.log('Key passed to JWT (first 100 chars):', privateKey.substring(0, 100), '...');
+
+    throw error;
+  }
+}
+
+// Test immediately
+getAccessToken();
+
+async function getAccessToken() {
+  try {
+    const tokenResponse = await jwtClient.authorize();
+    console.log('✅ Access Token:', tokenResponse.access_token);
+    return tokenResponse.access_token;
+  } catch (error) {
+    console.error('❌ Error fetching access token:', error);
+    throw error;
+  }
+}
+
 /**
  * Build a Messenger "web_url" button template attachment.
  * This renders a clickable button that opens a website (not a quick reply).
