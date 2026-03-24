@@ -104,7 +104,7 @@ try {
    GEMINI AI SETUP
 ======================= */
 
-const { GoogleGenerativeAI } = require('@google/generai');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 let genAI;
 
 try {
