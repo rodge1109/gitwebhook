@@ -101,55 +101,19 @@ try {
 
 
 /* =======================
-   GEMINI AI SETUP
+   GEMINI AI (DISABLED)
 ======================= */
 
-let genAI;
-let GoogleGenerativeAI;
-
-try {
-  GoogleGenerativeAI = require('@google/generative-ai').GoogleGenerativeAI;
-  if (process.env.GEMINI_API_KEY) {
-    genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY.replace(/'/g, ''));
-    console.log('✅ Gemini AI initialized');
-  } else {
-    console.warn('⚠️ GEMINI_API_KEY not set in .env');
-  }
-} catch (err) {
-  console.warn('⚠️ @google/generative-ai package not installed. Sentiment analysis disabled.');
-  console.warn('   Install with: npm install @google/generative-ai');
-  genAI = null;
-}
+// Gemini AI integration removed. Sentiment analysis is disabled.
+let genAI = null;
 
 
 /* =======================
-   NODEMAILER SETUP
+   NODEMAILER (DISABLED)
 ======================= */
 
-let nodemailer;
-let emailTransporter;
-
-try {
-  nodemailer = require('nodemailer');
-  if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASSWORD) {
-    emailTransporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: parseInt(process.env.SMTP_PORT) || 587,
-      secure: false,
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASSWORD
-      }
-    });
-    console.log('✅ Email transporter initialized');
-  } else {
-    console.warn('⚠️ Email configuration incomplete in .env');
-  }
-} catch (err) {
-  console.warn('⚠️ nodemailer package not installed. Email reports disabled.');
-  console.warn('   Install with: npm install nodemailer');
-  emailTransporter = null;
-}
+// Nodemailer/email integration removed. Email reports are disabled.
+let emailTransporter = null;
 
 
 /* =======================
@@ -188,40 +152,12 @@ app.get('/health', async (req, res) => {
 ======================= */
 
 /**
- * Analyze sentiment of a comment using Gemini AI
+ * Analyze sentiment (DISABLED)
+ * Gemini AI integration removed — return neutral placeholder.
  */
 async function analyzeSentiment(commentText) {
-  try {
-    if (!genAI) {
-      console.error('❌ Gemini AI not initialized');
-      return { sentiment: 'UNKNOWN', score: 0, reason: 'AI not initialized' };
-    }
-
-    const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
-    
-    const prompt = `Analyze the sentiment of this comment and respond ONLY with a JSON object. No other text.
-Comment: "${commentText}"
-
-Respond with ONLY this format:
-{"sentiment": "POSITIVE" or "NEGATIVE" or "NEUTRAL", "score": 0.0-1.0, "reason": "brief reason"}`;
-
-    const result = await model.generateContent(prompt);
-    const responseText = result.response.text();
-    
-    // Extract JSON from response
-    const jsonMatch = responseText.match(/\{[^}]+\}/);
-    if (jsonMatch) {
-      const sentiment = JSON.parse(jsonMatch[0]);
-      console.log(`✅ Sentiment analyzed: ${sentiment.sentiment} (${sentiment.score})`);
-      return sentiment;
-    } else {
-      console.warn('⚠️ Could not extract JSON from AI response');
-      return { sentiment: 'UNKNOWN', score: 0.5, reason: 'Invalid AI response' };
-    }
-  } catch (err) {
-    console.error('❌ Error analyzing sentiment:', err.message);
-    return { sentiment: 'UNKNOWN', score: 0, reason: err.message };
-  }
+  console.warn('⚠️ Sentiment analysis disabled. Returning NEUTRAL for:', commentText ? commentText.substring(0,80) : '');
+  return { sentiment: 'NEUTRAL', score: 0.5, reason: 'sentiment disabled' };
 }
 
 /**
@@ -326,71 +262,8 @@ async function saveCommentToSheet(pageId, commentData, keywordsSheetId) {
  * Send sentiment analysis email report
  */
 async function sendSentimentReportEmail(comments, recipientEmail = null) {
-  try {
-    if (!emailTransporter) {
-      console.warn('⚠️ Email transporter not configured');
-      return false;
-    }
-
-    const recipients = recipientEmail || process.env.EMAIL_RECIPIENTS || '';
-    if (!recipients) {
-      console.warn('⚠️ No email recipients configured');
-      return false;
-    }
-
-    const positiveCount = comments.filter(c => c.sentiment === 'POSITIVE').length;
-    const negativeCount = comments.filter(c => c.sentiment === 'NEGATIVE').length;
-    const neutralCount = comments.filter(c => c.sentiment === 'NEUTRAL').length;
-    const avgScore = comments.reduce((sum, c) => sum + (c.sentimentScore || 0), 0) / comments.length || 0;
-
-    let emailBody = `<h2>📊 Sentiment Analysis Report</h2>
-<p><strong>Report Generated:</strong> ${new Date().toLocaleString('en-US', { timeZone: 'UTC' })}</p>
-
-<h3>Summary</h3>
-<ul>
-  <li><strong>Total Comments Analyzed:</strong> ${comments.length}</li>
-  <li><strong>Positive:</strong> ${positiveCount} (${((positiveCount / comments.length) * 100).toFixed(1)}%)</li>
-  <li><strong>Negative:</strong> ${negativeCount} (${((negativeCount / comments.length) * 100).toFixed(1)}%)</li>
-  <li><strong>Neutral:</strong> ${neutralCount} (${((neutralCount / comments.length) * 100).toFixed(1)}%)</li>
-  <li><strong>Average Sentiment Score:</strong> ${avgScore.toFixed(2)}</li>
-</ul>
-
-<h3>Recent Comments</h3>
-<table border="1" cellpadding="10">
-  <tr>
-    <th>Timestamp</th>
-    <th>Comment</th>
-    <th>Sentiment</th>
-    <th>Score</th>
-  </tr>`;
-
-    comments.slice(-20).forEach(comment => {
-      const sentimentEmoji = comment.sentiment === 'POSITIVE' ? '😊' : comment.sentiment === 'NEGATIVE' ? '😠' : '😐';
-      emailBody += `
-  <tr>
-    <td>${comment.timestamp || 'N/A'}</td>
-    <td>${(comment.commentText || '').substring(0, 100)}...</td>
-    <td>${sentimentEmoji} ${comment.sentiment}</td>
-    <td>${(comment.sentimentScore || 0).toFixed(2)}</td>
-  </tr>`;
-    });
-
-    emailBody += `</table>`;
-
-    const mailOptions = {
-      from: process.env.EMAIL_FROM || process.env.SMTP_USER,
-      to: recipients,
-      subject: `📊 Facebook Comments Sentiment Analysis Report - ${new Date().toLocaleDateString()}`,
-      html: emailBody
-    };
-
-    await emailTransporter.sendMail(mailOptions);
-    console.log(`✅ Sentiment report email sent to: ${recipients}`);
-    return true;
-  } catch (err) {
-    console.error('❌ Error sending email:', err.message);
-    return false;
-  }
+  console.warn('⚠️ Email reports disabled. sendSentimentReportEmail skipped.');
+  return false;
 }
 
 /**
@@ -428,135 +301,8 @@ async function getSenderName(senderId, pageToken) {
   }
 }
 
-// Scheduled task to send daily sentiment report (run at 9 AM UTC)
-function scheduleDailySentimentReport() {
-  setInterval(async () => {
-    const now = new Date();
-    if (now.getHours() === 9 && now.getMinutes() < 5) {
-      console.log('📊 Running scheduled sentiment report...');
-      try {
-        // Get all pages from WebhookConfig
-        const configRes = await sheets.spreadsheets.values.get({
-          spreadsheetId: process.env.SHEET_ID,
-          range: 'WebhookConfig!A:G',
-        });
-
-        const configRows = configRes.data.values || [];
-        const allComments = [];
-
-        // Fetch comments from each page's keywords sheet
-        for (let i = 1; i < configRows.length; i++) {
-          const [pageId, , keywordsSheetId, , , , recipientEmail] = configRows[i];
-          
-          if (!pageId || !keywordsSheetId) continue;
-
-          try {
-            const res = await sheets.spreadsheets.values.get({
-              spreadsheetId: keywordsSheetId,
-              range: 'Comments!A2:J1000',
-            });
-
-            const rows = res.data.values || [];
-            if (rows.length > 0) {
-              rows.forEach(row => {
-                allComments.push({
-                  timestamp: row[0],
-                  pageId: row[1],
-                  commentId: row[2],
-                  postId: row[3],
-                  senderId: row[4],
-                  senderName: row[5],
-                  commentText: row[6],
-                  sentiment: row[7],
-                  sentimentScore: parseFloat(row[8]) || 0,
-                  sentimentReason: row[9]
-                });
-              });
-            }
-          } catch (err) {
-            // Sheet might not have Comments tab yet, that's OK
-            if (!err.message.includes('Unable to parse range')) {
-              console.error(`Error fetching comments from page ${pageId}:`, err.message);
-            }
-          }
-        }
-
-        // Send reports to each page's email with their comments
-        for (let i = 1; i < configRows.length; i++) {
-          const [pageId, , keywordsSheetId, , recipientEmail] = configRows[i];
-          
-          if (!pageId || !keywordsSheetId || !recipientEmail) continue;
-
-          try {
-            const res = await sheets.spreadsheets.values.get({
-              spreadsheetId: keywordsSheetId,
-              range: 'Comments!A2:J1000',
-            });
-
-            const rows = res.data.values || [];
-            const pageComments = [];
-            const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);
-            
-            if (rows.length > 0) {
-              rows.forEach(row => {
-                const timestamp = new Date(row[0]);
-                if (timestamp.getTime() > oneDayAgo) {
-                  pageComments.push({
-                    timestamp: row[0],
-                    pageId: row[1],
-                    commentId: row[2],
-                    postId: row[3],
-                    senderId: row[4],
-                    senderName: row[5],
-                    commentText: row[6],
-                    sentiment: row[7],
-                    sentimentScore: parseFloat(row[8]) || 0,
-                    sentimentReason: row[9]
-                  });
-                }
-              });
-            }
-
-            if (pageComments.length > 0) {
-              console.log(`📧 Sending daily report for page ${pageId} to ${recipientEmail} (${pageComments.length} comments)`);
-              await sendSentimentReportEmail(pageComments, recipientEmail);
-            }
-          } catch (err) {
-            if (!err.message.includes('Unable to parse range')) {
-              console.error(`Error fetching comments for page ${pageId}:`, err.message);
-            }
-          }
-        }
-
-        console.log('✅ Daily sentiment reports completed');
-        return;
-        
-        // Old code (archived):
-        if (false && allComments.length > 0) {
-          // Filter comments from last 24 hours
-          const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);
-          const recentComments = allComments.filter(c => {
-            const commentTime = new Date(c.timestamp).getTime();
-            return commentTime > oneDayAgo;
-          });
-
-          if (recentComments.length > 0) {
-            await sendSentimentReportEmail(recentComments);
-          } else {
-            console.log('ℹ️ No comments in the last 24 hours for report');
-          }
-        } else {
-          console.log('ℹ️ No comments found across all pages');
-        }
-      } catch (err) {
-        console.error('❌ Error scheduling sentiment report:', err.message);
-      }
-    }
-  }, 60 * 1000); // Check every minute
-}
-
-// Start the scheduled report
-scheduleDailySentimentReport();
+// Daily sentiment reporting and scheduling removed.
+// scheduleDailySentimentReport() was removed per configuration (email/sentiment disabled).
 
 //SMS INTEGRATION
 // =======================
