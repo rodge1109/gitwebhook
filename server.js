@@ -77,27 +77,62 @@ setInterval(() => {
    GOOGLE SHEETS SETUP
 ======================= */
 
+//let sheets;
+
+//try {
+//  const credentials = process.env.GOOGLE_CREDENTIALS_BASE64
+//  ? JSON.parse(Buffer.from(process.env.GOOGLE_CREDENTIALS_BASE64, 'base64').toString())
+//  : require('./credentials.json'); // local fallback
+
+//  const auth = new google.auth.GoogleAuth({
+//    credentials,
+//    scopes: [
+//      'https://www.googleapis.com/auth/spreadsheets',
+//      'https://www.googleapis.com/auth/spreadsheets.readonly',
+//    ],
+//  });
+
+//  sheets = google.sheets({ version: 'v4', auth });
+//  console.log('✅ Google Sheets auth initialized');
+//} catch (err) {
+//  console.error('❌ Google Sheets auth failed');
+//  console.error(err.message);
+//}
+
+
 let sheets;
 
-try {
-  const credentials = process.env.GOOGLE_CREDENTIALS_BASE64
-  ? JSON.parse(Buffer.from(process.env.GOOGLE_CREDENTIALS_BASE64, 'base64').toString())
-  : require('./credentials.json'); // local fallback
+function initGoogle() {
+  try {
+    if (!process.env.GOOGLE_CREDENTIALS_BASE64) {
+      throw new Error("Missing GOOGLE_CREDENTIALS_BASE64");
+    }
 
-  const auth = new google.auth.GoogleAuth({
-    credentials,
-    scopes: [
-      'https://www.googleapis.com/auth/spreadsheets',
-      'https://www.googleapis.com/auth/spreadsheets.readonly',
-    ],
-  });
+    const decoded = Buffer.from(process.env.GOOGLE_CREDENTIALS_BASE64, 'base64').toString();
 
-  sheets = google.sheets({ version: 'v4', auth });
-  console.log('✅ Google Sheets auth initialized');
-} catch (err) {
-  console.error('❌ Google Sheets auth failed');
-  console.error(err.message);
+    const credentials = JSON.parse(decoded);
+
+    const auth = new google.auth.GoogleAuth({
+      credentials,
+      scopes: [
+        'https://www.googleapis.com/auth/spreadsheets',
+      ],
+    });
+
+    sheets = google.sheets({ version: 'v4', auth });
+
+    console.log('✅ Google Sheets auth initialized');
+
+  } catch (err) {
+    console.error('❌ Google Sheets auth failed:', err.message);
+    sheets = null; // IMPORTANT
+  }
 }
+
+initGoogle();
+
+
+
 
 
 /* =======================
