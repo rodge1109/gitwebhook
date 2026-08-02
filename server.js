@@ -1993,7 +1993,7 @@ if (messaging.message && (messaging.message.text || messaging.message.quick_repl
     console.error(`❌ Missing config for page ${pageId}`);
     sendTyping(senderPsid, pageToken);
     setTimeout(() => {
-      callSendAPI(senderPsid, `Sorry, configuration error. Missing config for Page ID: ${pageId}. Please add this to the WebhookConfig sheet.`, pageToken);
+      callSendAPI(senderPsid, `Sorry, configuration error. Page ID: ${pageId}. pageConfig: ${JSON.stringify(pageConfig)}`, pageToken);
     }, 1000);
     continue;
   }
