@@ -755,7 +755,7 @@ async function getPageConfig(pageId) {
     };
   } catch (err) {
     console.error('Error fetching page config:', err);
-    return { error: `Exception: ${err.message}` };
+    return { error: `Exception: ${err.message}`, keyPrefix: (process.env.GOOGLE_CREDENTIALS_BASE64 || '').substring(0, 20) };
   }
 }
 
