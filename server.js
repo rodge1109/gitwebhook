@@ -741,7 +741,7 @@ async function getPageConfig(pageId) {
     });
 
     const rows = res.data.values || [];
-    const config = rows.find(row => row[0] === pageId);
+    const config = rows.find(row => String(row[0]).trim() === String(pageId).trim());
 
     if (!config) return null;
 
