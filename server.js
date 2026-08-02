@@ -743,7 +743,9 @@ async function getPageConfig(pageId) {
     const rows = res.data.values || [];
     const config = rows.find(row => String(row[0]).trim() === String(pageId).trim());
 
-    if (!config) return null;
+    if (!config) {
+      return { error: `Row not found. Total rows: ${rows.length}` };
+    }
 
     return {
       pageId: config[0],
@@ -753,7 +755,7 @@ async function getPageConfig(pageId) {
     };
   } catch (err) {
     console.error('Error fetching page config:', err);
-    return null;
+    return { error: `Exception: ${err.message}` };
   }
 }
 
