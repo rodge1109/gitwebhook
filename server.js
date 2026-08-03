@@ -778,7 +778,7 @@ async function getPageConfig(pageId) {
 
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId: process.env.SHEET_ID,
-      range: 'WebhookConfig!A:D',
+      range: 'WebhookConfig!A:E',
     });
 
     const rows = res.data.values || [];
@@ -788,11 +788,15 @@ async function getPageConfig(pageId) {
       return { error: `Row not found. Total rows: ${rows.length}` };
     }
 
+    const allowKiaraVal = config[4] !== undefined ? String(config[4]).trim().toUpperCase() : 'TRUE';
+    const allowKiara = allowKiaraVal !== 'FALSE' && allowKiaraVal !== 'NO';
+
     const result = {
       pageId: config[0],
       pageToken: config[1],
       keywordsSheetId: config[2],
       bookingSheetId: config[3] || config[2],
+      allowKiara: allowKiara,
     };
     
     pageConfigCache[pageId] = { timestamp: now, data: result };
@@ -2369,30 +2373,44 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
 
   // Handle Hybrid approach: Use Gemini AI for unmatched keywords
   if (!match) {
-    sendTyping(senderPsid, pageToken);
-    
-    // Look for a SYSTEM_PROMPT in the keywords sheet
-    let systemPrompt = null;
-    const sysPromptRow = keywords.find(row => {
-      if (!row[0]) return false;
-      return row[0].trim().toUpperCase() === 'SYSTEM_PROMPT';
-    });
-    
-    if (sysPromptRow && sysPromptRow[1]) {
-      systemPrompt = sysPromptRow[1].trim();
-    }
-    
-    const aiReply = await generateGeminiReply(receivedText, systemPrompt);
-    
-    if (aiReply) {
-      callSendAPI(senderPsid, aiReply, pageToken);
-    } else {
-      // Fallback if Gemini fails
-      keywordMissCounters[senderPsid] = (keywordMissCounters[senderPsid] || 0) + 1;
-      if (keywordMissCounters[senderPsid] >= 3) {
-        callSendAPI(senderPsid, "Our admin will respond to you when available. Thank you for your patience!", pageToken);
+    if (pageConfig.allowKiara) {
+      sendTyping(senderPsid, pageToken);
+      
+      // Look for a SYSTEM_PROMPT in the keywords sheet
+      let systemPrompt = null;
+      const sysPromptRow = keywords.find(row => {
+        if (!row[0]) return false;
+        return row[0].trim().toUpperCase() === 'SYSTEM_PROMPT';
+      });
+      
+      if (sysPromptRow && sysPromptRow[1]) {
+        systemPrompt = sysPromptRow[1].trim();
+      }
+      
+      const aiReply = await generateGeminiReply(receivedText, systemPrompt);
+      
+      if (aiReply) {
+        callSendAPI(senderPsid, aiReply, pageToken);
       } else {
-        callSendAPI(senderPsid, "I'm having a little trouble connecting right now. Could you please rephrase or try again later?", pageToken);
+        // Fallback if Gemini fails
+        keywordMissCounters[senderPsid] = (keywordMissCounters[senderPsid] || 0) + 1;
+        if (keywordMissCounters[senderPsid] >= 3) {
+          callSendAPI(senderPsid, "Our admin will respond to you when available. Thank you for your patience!", pageToken);
+          keywordMissCounters[senderPsid] = 0;
+        } else {
+          callSendAPI(senderPsid, "I'm having a little trouble connecting right now. Could you please rephrase or try again later?", pageToken);
+        }
+      }
+    } else {
+      // If AI is disabled, run the original silent fallback logic (silent for 1st/2nd miss, handoff message on 3rd)
+      keywordMissCounters[senderPsid] = (keywordMissCounters[senderPsid] || 0) + 1;
+      console.log(`🔇 Silent mode (Kiara disabled): Miss counter ${keywordMissCounters[senderPsid]}/3 for page ${pageId}`);
+      if (keywordMissCounters[senderPsid] >= 3) {
+        sendTyping(senderPsid, pageToken);
+        setTimeout(() => {
+          callSendAPI(senderPsid, "Our admin will respond to you when available. Thank you for your patience!", pageToken);
+        }, 1000);
+        keywordMissCounters[senderPsid] = 0;
       }
     }
     continue; // Skip the structured column parsing for misses
