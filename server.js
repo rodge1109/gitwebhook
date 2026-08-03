@@ -2755,14 +2755,15 @@ app.get('/test-gemini', async (req, res) => {
     if (!keyRaw) {
       return res.status(500).json({ success: false, error: 'GEMINI_API_KEY is missing', serverId: SERVER_ID });
     }
-    const reply = await generateGeminiReply('Say hello in one sentence.', null);
-    if (reply) {
-      res.json({ success: true, reply, keyPreview, serverId: SERVER_ID });
-    } else {
-      res.status(500).json({ success: false, error: 'generateGeminiReply returned null — check server logs', keyPreview, serverId: SERVER_ID });
-    }
+    // Call Gemini directly to expose raw error
+    const { GoogleGenerativeAI } = require('@google/generative-ai');
+    const genAI = new GoogleGenerativeAI(keyRaw);
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+    const result = await model.generateContent('Say hello in one sentence.');
+    const reply = result.response.text().trim();
+    res.json({ success: true, reply, keyPreview, serverId: SERVER_ID });
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message, serverId: SERVER_ID });
+    res.status(500).json({ success: false, error: err.message, keyPreview: (process.env.GEMINI_API_KEY||'').substring(0,10)+'...', serverId: SERVER_ID });
   }
 });
 
