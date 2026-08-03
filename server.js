@@ -778,7 +778,7 @@ async function getPageConfig(pageId) {
 
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId: process.env.SHEET_ID,
-      range: 'WebhookConfig!A:E',
+      range: 'WebhookConfig!A:J',
     });
 
     const rows = res.data.values || [];
@@ -788,7 +788,7 @@ async function getPageConfig(pageId) {
       return { error: `Row not found. Total rows: ${rows.length}` };
     }
 
-    const allowKiaraVal = config[4] !== undefined ? String(config[4]).trim().toUpperCase() : 'TRUE';
+    const allowKiaraVal = config[9] !== undefined ? String(config[9]).trim().toUpperCase() : 'TRUE';
     const allowKiara = allowKiaraVal !== 'FALSE' && allowKiaraVal !== 'NO';
 
     const result = {
