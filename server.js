@@ -3,6 +3,9 @@
 if (!process.env.RENDER) {
   require('dotenv').config({ override: true });
 }
+const SERVER_ID = Math.random().toString(36).substring(2, 9);
+console.log(`🚀 Starting server with ID: ${SERVER_ID}`);
+
 const express = require('express');
 const bodyParser = require('body-parser');
 const { google } = require('googleapis');
@@ -796,7 +799,7 @@ async function getPageConfig(pageId) {
     return result;
   } catch (err) {
     console.error('Error fetching page config:', err);
-    return { error: `Exception: ${err.message}`, keyPrefix: (process.env.GOOGLE_CREDENTIALS_BASE64 || '').substring(150, 170) };
+    return { error: `[Server: ${SERVER_ID}] Exception: ${err.message}`, keyPrefix: (process.env.GOOGLE_CREDENTIALS_BASE64 || '').substring(150, 170) };
   }
 }
 
@@ -2736,10 +2739,10 @@ app.get('/test-sheets-auth', async (req, res) => {
       spreadsheetId: process.env.SHEET_ID,
       range: 'WebhookConfig!A:D',
     });
-    res.json({ success: true, rowsCount: response.data.values?.length });
+    res.json({ success: true, rowsCount: response.data.values?.length, serverId: SERVER_ID });
   } catch (err) {
     console.error('❌ /test-sheets-auth failed:', err);
-    res.status(500).json({ success: false, error: err.message, stack: err.stack, systemTime: new Date().toISOString() });
+    res.status(500).json({ success: false, error: err.message, stack: err.stack, systemTime: new Date().toISOString(), serverId: SERVER_ID });
   }
 });
 
