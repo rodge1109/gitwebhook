@@ -1,6 +1,8 @@
 // server.js
 
-require('dotenv').config({ override: true });
+if (!process.env.RENDER) {
+  require('dotenv').config({ override: true });
+}
 const express = require('express');
 const bodyParser = require('body-parser');
 const { google } = require('googleapis');
