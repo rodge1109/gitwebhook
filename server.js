@@ -2025,10 +2025,11 @@ if (messaging.message && (messaging.message.text || messaging.message.quick_repl
 
   // Add safety check
   if (!keywordsSheetId || !bookingSheetId) {
-    console.error(`❌ Missing config for page ${pageId}`);
+    const details = pageConfig?.error ? `Error: ${pageConfig.error}` : `keywordsSheetId is ${keywordsSheetId ? 'present' : 'missing'}, bookingSheetId is ${bookingSheetId ? 'present' : 'missing'}`;
+    console.error(`❌ Missing config for page ${pageId}. Details: ${details}`);
     sendTyping(senderPsid, pageToken);
     setTimeout(() => {
-      callSendAPI(senderPsid, `Sorry, configuration error. Missing config for Page ID: ${pageId}. Please check the WebhookConfig sheet.`, pageToken);
+      callSendAPI(senderPsid, `Sorry, configuration error. Missing config for Page ID: ${pageId}. Details: ${details}. Please check the WebhookConfig sheet.`, pageToken);
     }, 1000);
     continue;
   }
