@@ -754,9 +754,16 @@ async function generateGeminiReply(userMessage, systemPrompt) {
 // =======================
 
 const keywordsCache = {};
+const pageConfigCache = {};
 
 async function getPageConfig(pageId) {
   try {
+    const now = Date.now();
+    // Cache for 5 minutes
+    if (pageConfigCache[pageId] && (now - pageConfigCache[pageId].timestamp < 300000)) {
+      return pageConfigCache[pageId].data;
+    }
+
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId: process.env.SHEET_ID,
       range: 'WebhookConfig!A:D',
@@ -769,12 +776,15 @@ async function getPageConfig(pageId) {
       return { error: `Row not found. Total rows: ${rows.length}` };
     }
 
-    return {
+    const result = {
       pageId: config[0],
       pageToken: config[1],
       keywordsSheetId: config[2],
       bookingSheetId: config[3] || config[2],
     };
+    
+    pageConfigCache[pageId] = { timestamp: now, data: result };
+    return result;
   } catch (err) {
     console.error('Error fetching page config:', err);
     return { error: `Exception: ${err.message}`, keyPrefix: (process.env.GOOGLE_CREDENTIALS_BASE64 || '').substring(150, 170) };
@@ -1761,6 +1771,7 @@ app.get('/webhook', (req, res) => {
 // =======================
 app.post('/webhook', async (req, res) => {
   const body = req.body;
+  res.sendStatus(200); // 🚀 Send 200 OK immediately to prevent Facebook retries
 
   // Check for valid object type
   if (body.object === 'page') {
@@ -2583,7 +2594,6 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
 
     }
   }
-  res.sendStatus(200);
 });
 
 // =======================
