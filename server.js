@@ -5,6 +5,7 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const { google } = require('googleapis');
 const request = require('request');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 const app = express();
 app.use(bodyParser.json());
@@ -723,6 +724,27 @@ async function lookupBill(conscode) {
   } catch (err) {
     console.error('❌ Error looking up bill:', err.message);
     console.error('   Full error:', err);
+    return null;
+  }
+}
+
+// =======================
+// GEMINI CHATBOT ASSISTANT
+// =======================
+async function generateGeminiReply(userMessage, systemPrompt) {
+  try {
+    if (!process.env.GEMINI_API_KEY) {
+      console.warn('⚠️ GEMINI_API_KEY is missing.');
+      return null;
+    }
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+    const instruction = systemPrompt || process.env.GEMINI_SYSTEM_PROMPT || 'You are a helpful customer support agent. Please be concise, friendly, and helpful.';
+    const prompt = `System Instruction:\n${instruction}\n\nUser: ${userMessage}\n\nAgent:`;
+    const result = await model.generateContent(prompt);
+    return result.response.text().trim();
+  } catch (error) {
+    console.error('❌ Error generating Gemini reply:', error.message);
     return null;
   }
 }
@@ -2321,32 +2343,35 @@ if (receivedText === 'help' || receivedText === 'emergency' || receivedText === 
 
   let reply = "Hi! I want to make sure I help you correctly. Could you please clarify your concern?";
 
-  // Track keyword misses per user
+  // Handle Hybrid approach: Use Gemini AI for unmatched keywords
   if (!match) {
-    keywordMissCounters[senderPsid] = (keywordMissCounters[senderPsid] || 0) + 1;
-    console.log(`❌ Keyword miss #${keywordMissCounters[senderPsid]} for ${senderPsid}`);
-
-    if (keywordMissCounters[senderPsid] === 1) {
-      // 1st miss: greet by name
-      const userInfo = await getUserInfo(senderPsid, pageToken);
-      const firstName = userInfo?.firstName && userInfo.firstName !== 'Unknown' ? userInfo.firstName : null;
-      reply = firstName
-        ? `Hi ${firstName}! I want to make sure I help you correctly. Could you please clarify your question?`
-        : `Hi! I want to make sure I help you correctly. Could you please clarify your concern?`;
+    sendTyping(senderPsid, pageToken);
+    
+    // Look for a SYSTEM_PROMPT in the keywords sheet
+    let systemPrompt = null;
+    const sysPromptRow = keywords.find(row => {
+      if (!row[0]) return false;
+      return row[0].trim().toUpperCase() === 'SYSTEM_PROMPT';
+    });
+    
+    if (sysPromptRow && sysPromptRow[1]) {
+      systemPrompt = sysPromptRow[1].trim();
     }
-
-    if (keywordMissCounters[senderPsid] === 3) {
-      // 3rd miss: handoff message (Gemini fallback removed)
-      sendTyping(senderPsid, pageToken);
-      setTimeout(() => {
+    
+    const aiReply = await generateGeminiReply(receivedText, systemPrompt);
+    
+    if (aiReply) {
+      callSendAPI(senderPsid, aiReply, pageToken);
+    } else {
+      // Fallback if Gemini fails
+      keywordMissCounters[senderPsid] = (keywordMissCounters[senderPsid] || 0) + 1;
+      if (keywordMissCounters[senderPsid] >= 3) {
         callSendAPI(senderPsid, "Our admin will respond to you when available. Thank you for your patience!", pageToken);
-      }, 1500);
-      continue;
-    } else if (keywordMissCounters[senderPsid] >= 2) {
-      // 2nd miss and 4+ misses: go silent, no reply at all
-      console.log(`🔇 Silent mode for ${senderPsid} (miss #${keywordMissCounters[senderPsid]})`);
-      continue;
+      } else {
+        callSendAPI(senderPsid, "I'm having a little trouble connecting right now. Could you please rephrase or try again later?", pageToken);
+      }
     }
+    continue; // Skip the structured column parsing for misses
   } else {
     keywordMissCounters[senderPsid] = 0;
   }
