@@ -750,7 +750,7 @@ async function generateGeminiReply(userMessage, systemPrompt) {
       return null;
     }
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
     const instruction = systemPrompt || process.env.GEMINI_SYSTEM_PROMPT || 'You are a helpful customer support agent. Please be concise, friendly, and helpful.';
     const prompt = `System Instruction:\n${instruction}\n\nUser: ${userMessage}\n\nAgent:`;
     const result = await model.generateContent(prompt);
@@ -2758,7 +2758,7 @@ app.get('/test-gemini', async (req, res) => {
     // Call Gemini directly to expose raw error
     const { GoogleGenerativeAI } = require('@google/generative-ai');
     const genAI = new GoogleGenerativeAI(keyRaw);
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
     const result = await model.generateContent('Say hello in one sentence.');
     const reply = result.response.text().trim();
     res.json({ success: true, reply, keyPreview, serverId: SERVER_ID });
