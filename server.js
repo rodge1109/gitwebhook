@@ -107,6 +107,9 @@ let sheets;
 
 function initGoogle() {
   try {
+    const raw = process.env.GOOGLE_CREDENTIALS_BASE64 || '';
+    console.log(`🔑 GOOGLE_CREDENTIALS_BASE64 info: length=${raw.length}, startsWith=${raw.substring(0, 10)}, endsWith=${raw.substring(raw.length - 10)}`);
+
     if (!process.env.GOOGLE_CREDENTIALS_BASE64) {
       throw new Error("Missing GOOGLE_CREDENTIALS_BASE64");
     }
