@@ -109,7 +109,11 @@ function initGoogle() {
       throw new Error("Missing GOOGLE_CREDENTIALS_BASE64");
     }
 
-    const decoded = Buffer.from(process.env.GOOGLE_CREDENTIALS_BASE64, 'base64').toString();
+    let base64Str = (process.env.GOOGLE_CREDENTIALS_BASE64 || '').trim();
+    // Strip surrounding quotes if present
+    base64Str = base64Str.replace(/^['"]|['"]$/g, '');
+
+    const decoded = Buffer.from(base64Str, 'base64').toString();
 
     const credentials = JSON.parse(decoded);
 
