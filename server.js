@@ -2748,6 +2748,25 @@ app.get('/check-bill-sheet', async (req, res) => {
 });
 
 // =======================
+app.get('/test-gemini', async (req, res) => {
+  try {
+    const keyRaw = process.env.GEMINI_API_KEY || '';
+    const keyPreview = keyRaw.substring(0, 10) + '...' + keyRaw.substring(keyRaw.length - 5);
+    if (!keyRaw) {
+      return res.status(500).json({ success: false, error: 'GEMINI_API_KEY is missing', serverId: SERVER_ID });
+    }
+    const reply = await generateGeminiReply('Say hello in one sentence.', null);
+    if (reply) {
+      res.json({ success: true, reply, keyPreview, serverId: SERVER_ID });
+    } else {
+      res.status(500).json({ success: false, error: 'generateGeminiReply returned null — check server logs', keyPreview, serverId: SERVER_ID });
+    }
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message, serverId: SERVER_ID });
+  }
+});
+
+// =======================
 app.get('/test-sheets-auth', async (req, res) => {
   try {
     if (!sheets) {
