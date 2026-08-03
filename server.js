@@ -2727,6 +2727,22 @@ app.get('/check-bill-sheet', async (req, res) => {
 });
 
 // =======================
+app.get('/test-sheets-auth', async (req, res) => {
+  try {
+    if (!sheets) {
+      return res.status(500).json({ error: 'Sheets client not initialized' });
+    }
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId: process.env.SHEET_ID,
+      range: 'WebhookConfig!A:D',
+    });
+    res.json({ success: true, rowsCount: response.data.values?.length });
+  } catch (err) {
+    console.error('❌ /test-sheets-auth failed:', err);
+    res.status(500).json({ success: false, error: err.message, stack: err.stack, systemTime: new Date().toISOString() });
+  }
+});
+
 // AUTO-SUBSCRIBE ALL PAGES ON STARTUP
 // =======================
 async function autoSubscribeAllPages() {
